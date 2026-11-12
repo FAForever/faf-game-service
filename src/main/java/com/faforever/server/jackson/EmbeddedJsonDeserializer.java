@@ -18,6 +18,11 @@ public class EmbeddedJsonDeserializer extends ValueDeserializer<Object> {
 
     private final @Nullable JavaType type;
 
+    @SuppressWarnings("unused")
+    public EmbeddedJsonDeserializer() {
+        this(null);
+    }
+
     private EmbeddedJsonDeserializer(@Nullable JavaType type) {
         this.type = type;
     }

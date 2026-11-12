@@ -7,6 +7,7 @@ import com.faforever.server.message.client.GameMessage;
 import com.faforever.server.message.client.dto.GameInfo;
 import com.faforever.server.message.client.dto.GameStatus;
 import com.faforever.server.message.client.dto.GameVisibility;
+import com.faforever.server.message.client.dto.JsonStatsPayload;
 import com.faforever.server.message.client.dto.LobbyMode;
 import com.faforever.server.message.service.InboundGPGMessage;
 import com.faforever.server.message.service.OutboundGPGMessage;
@@ -26,6 +27,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.MDC;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -37,7 +39,6 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Dependent
@@ -54,13 +55,11 @@ class GameHandler {
     @Getter(AccessLevel.PACKAGE)
     private final int gameId;
 
-    private final Set<Integer> playerIds = ConcurrentHashMap.newKeySet();
-    private final Map<Long, GamePlayer> playerSessionMap = new ConcurrentHashMap<>();
-    private final Map<Integer, Set<GamePlayer>> teamMap = new ConcurrentHashMap<>();
+    private final GameOptions gameOptions = new GameOptions();
 
-    private final Map<String, Map<String, Object>> aiOptions = new ConcurrentHashMap<>();
-    private final Map<Integer, Map<String, Object>> playerOptions = new ConcurrentHashMap<>();
-    private final Map<String, Object> options = new ConcurrentHashMap<>();
+    private final Map<Integer, GamePlayer> playerIdMap = new ConcurrentHashMap<>();
+    private final Map<Long, GamePlayer> playerSessionMap = new ConcurrentHashMap<>();
+
     private final LongAdder desyncs = new LongAdder();
 
     private @Nullable GameDetails details;
@@ -79,16 +78,16 @@ class GameHandler {
         this.gameStateTracker = gameStateTracker;
         this.gpgEmitter = gpgEmitter;
         this.lobbyEmitter = lobbyEmitter;
-        this.gpgMessageExecutor = createMessageExecutor(
-                maxMessageQueueSize == 0 ? Integer.MAX_VALUE : maxMessageQueueSize);
         gpgDroppedMessageCounter = meterRegistry.counter("faf.gpg.messages.dropped");
         gameId = gameStateTracker.nextGameId();
+        this.gpgMessageExecutor = createMessageExecutor(
+                maxMessageQueueSize == 0 ? Integer.MAX_VALUE : maxMessageQueueSize);
     }
 
     @MDCPopulated
     void accept(InboundGPGMessage<GPGMessage.Client> message) {
         gpgMessageExecutor.execute(() -> {
-            MDC.put(MDCInterceptor.COMMAND, message.message().command());
+            MDC.put(MDCInterceptor.COMMAND, message.message().content().command());
             MDC.put(MDCInterceptor.SESSION_ID, String.valueOf(message.sessionId()));
             MDC.put(MDCInterceptor.PLAYER_ID, String.valueOf(message.playerId()));
             MDC.put(MDCInterceptor.GAME_ID, String.valueOf(gameId));
@@ -103,7 +102,7 @@ class GameHandler {
         });
     }
 
-    void initializeDetails(String title, String mapName, boolean enforceRating, GameDetails gameDetails) {
+    void initializeDetails(String title, String mapName, GameDetails gameDetails) {
         if (details != null) {
             throw new IllegalStateException("Game details already set");
         }
@@ -111,7 +110,6 @@ class GameHandler {
         this.details = gameDetails;
         this.title = title;
         this.mapName = mapName;
-        this.enforceRating = enforceRating;
     }
 
     void launch(LaunchDetails launchDetails) {
@@ -119,7 +117,7 @@ class GameHandler {
             throw new IllegalStateException("Game details not set");
         }
 
-        LOG.debug("Launching game");
+        LOG.debug("Sending launch response with details {}", launchDetails);
 
         LobbyMode lobbyMode = switch (details.gameType()) {
             case COOP, CUSTOM, TUTORIAL -> LobbyMode.DEFAULT_LOBBY;
@@ -141,12 +139,13 @@ class GameHandler {
         long sessionId = launchDetails.sessionId();
         GamePlayer player = launchDetails.player();
         playerSessionMap.put(sessionId, player);
-        playerIds.add(player.playerId());
+        playerIdMap.put(player.playerId(), player);
 
         lobbyEmitter.send(OutboundGameMessage.forSession(sessionId, gameLaunchResponse));
     }
 
     private void handleGPGMessage(InboundGPGMessage<GPGMessage.Client> message) {
+        LOG.debug("Received gpg message: {}", message.message());
         if (details == null) {
             throw new IllegalStateException("GPG message received before game details set");
         }
@@ -154,57 +153,51 @@ class GameHandler {
         long sessionId = message.sessionId();
         int playerId = message.playerId();
         boolean isHost = playerId == details.host().playerId();
-        switch (message.message()) {
+        switch (message.message().content()) {
             case GPGMessage.AIOption aiOption when isHost -> {
-                aiOptions.computeIfAbsent(aiOption.aiName(), _ -> new ConcurrentHashMap<>())
-                         .put(aiOption.optionKey(), aiOption.optionValue());
                 gameStateTracker.markDirty(this);
             }
             case GPGMessage.ClearSlot clearSlot when isHost -> {
-                int slot = Integer.parseInt(clearSlot.args().getFirst().toString());
+                int slot = clearSlot.slot();
                 //        game.clearSlot(slot);
             }
-            case GPGMessage.EnforceRating _ when isHost -> {
-                enforceRating = true;
-                gameStateTracker.markDirty(this);
-            }
             case GPGMessage.PlayerOption playerOption when isHost -> {
-                int optionPlayerId = Integer.parseInt(playerOption.args().getFirst().toString());
-                String key = playerOption.args().get(1).toString();
-                Object value = playerOption.args().get(2);
+                int optionPlayerId = playerOption.playerId();
+                String key = playerOption.key();
+                Object value = playerOption.value();
 
-                playerOptions.computeIfAbsent(optionPlayerId, _ -> new ConcurrentHashMap<>()).put(key, value);
                 gameStateTracker.markDirty(this);
             }
             case GPGMessage.GameOption gameOption when isHost -> {
-                options.put(gameOption.args().get(0).toString(), gameOption.args().get(1));
                 gameStateTracker.markDirty(this);
             }
             case GPGMessage.GameMods gameMods when isHost -> {
-                String mode = gameMods.args().getFirst().toString();
-                if ("activated".equals(mode)) {
-                    int modCount = Integer.parseInt(gameMods.args().get(1).toString());
-                    if (modCount == 0) {
-                        //                game.clearMods();
+                switch (gameMods) {
+                    case GPGMessage.GameMods.Activated(int count) -> {
+
                     }
-                } else if ("uids".equals(mode)) {
-                    String[] uids = gameMods.args().get(1).toString().split(" ");
-                    //            game.setMods(Map.of(uids, "Unknown sim mod")); // Simplified - would fetch names from DB
+                    case GPGMessage.GameMods.Uids(Collection<String> uids) -> {
+
+                    }
                 }
             }
             case GPGMessage.Client.HostOnly hostOnly ->
                     LOG.warn("Host only message received from non host {}", hostOnly);
-            case GPGMessage.Bottleneck bottleneck -> LOG.debug("Bottleneck detected: {}", bottleneck.args());
+            case GPGMessage.EnforceRating _ -> {
+                enforceRating = true;
+                gameStateTracker.markDirty(this);
+            }
+            case GPGMessage.Bottleneck bottleneck -> LOG.debug("Bottleneck detected: {}", bottleneck);
             case GPGMessage.BottleneckCleared _ -> LOG.debug("Bottleneck cleared");
             case GPGMessage.Desync _ -> desyncs.increment();
-            case GPGMessage.Disconnected disconnected -> LOG.debug("Player disconnected: {}", disconnected.args());
+            case GPGMessage.Disconnected disconnected -> LOG.debug("Player disconnected: {}", disconnected);
             case GPGMessage.GameEnded _ -> {
 //        game.checkGameFinish(sessionController.getPlayer());
             }
             case GPGMessage.GameFull _ -> LOG.debug("Game is full");
             case GPGMessage.GameResult gameResult -> {
-                int army = Integer.parseInt(gameResult.args().getFirst().toString());
-                String result = gameResult.args().get(1).toString().toLowerCase();
+                int army = gameResult.army();
+                String result = gameResult.result();
 
                 String[] parts = result.split(" ");
                 if (parts.length >= 2) {
@@ -220,12 +213,12 @@ class GameHandler {
                 }
             }
             case GPGMessage.GameState gameState -> {
-                String state = gameState.state();
+                GPGMessage.GameState.State state = gameState.state();
 
                 switch (state) {
-                    case "Idle" -> {
+                    case GPGMessage.GameState.State.Known.IDLE -> {
                     }
-                    case "Lobby" -> {
+                    case GPGMessage.GameState.State.Known.LOBBY -> {
                         if (isHost && hostedAt == null) {
                             LOG.info("Hosting game");
                             gpgEmitter.send(OutboundGPGMessage.forSession(sessionId,
@@ -234,14 +227,14 @@ class GameHandler {
                             gameStateTracker.markDirty(this);
                         }
                     }
-                    case "Launching" -> {
+                    case GPGMessage.GameState.State.Known.LAUNCHING -> {
                         //        if (!isHost() || game.getState() != GameState.LOBBY) {
                         //            return;
                         //        }
                         LOG.info("Launching game");
                         launchedAt = Instant.now();
                     }
-                    case "Ended" -> {
+                    case GPGMessage.GameState.State.Unknown unknown -> {
 
                     }
                 }
@@ -252,7 +245,7 @@ class GameHandler {
                 LOG.debug("ICE message for player {}: {}", receiverId, iceMessage);
             }
             case GPGMessage.JsonStats jsonStats -> {
-                String stats = jsonStats.args().getFirst().toString();
+                JsonStatsPayload stats = jsonStats.payload();
                 //        try {
                 //            game.reportArmyStats(stats);
                 //        } catch (Exception e) {
@@ -260,25 +253,28 @@ class GameHandler {
                 //        }
             }
             case GPGMessage.LaunchStatus launchStatus -> {
-                String status = launchStatus.args().getFirst().toString();
-                LOG.debug("Launch status: {}", status);
+                LOG.debug("Launch status: {}", launchStatus.status());
             }
             case GPGMessage.OperationComplete operationComplete -> {
-                boolean primary = "1".equals(operationComplete.args().getFirst().toString());
-                boolean secondary = "1".equals(operationComplete.args().get(1).toString());
-                String delta = operationComplete.args().get(2).toString();
+                boolean primary = operationComplete.primary();
+                boolean secondary = operationComplete.secondary();
+                String delta = operationComplete.time();
 
-                if (primary) {
-                    LOG.info("Operation complete: primary={}, secondary={}, delta={}", primary, secondary, delta);
-                }
+                LOG.info("Operation complete: primary={}, secondary={}, delta={}", primary, secondary, delta);
             }
             case GPGMessage.Rehost _ -> LOG.debug("Game rehosted");
             case GPGMessage.TeamkillHappened teamkillHappened ->
-                    LOG.info("Teamkill happened: {}", teamkillHappened.args());
-            case GPGMessage.TeamkillReport teamkillReport -> LOG.info("Teamkill reported: {}", teamkillReport.args());
+                    LOG.info("Teamkill happened: {}", teamkillHappened);
+            case GPGMessage.TeamkillReport teamkillReport -> LOG.info("Teamkill reported: {}", teamkillReport);
             case GPGMessage.Chat _ -> {}
-            case GPGMessage.UnknownMessage unknownMessage ->
-                    LOG.info("Received unknown GPG message: {}", unknownMessage.command());
+            case GPGMessage.Beat _ -> {}
+            case GPGMessage.DisconnectedPeer _ -> {}
+            case GPGMessage.EstablishedPeer _ -> {}
+            case GPGMessage.ProcessNatPacket _ -> {}
+            case GPGMessage.XMLStats _ -> {}
+            case GPGMessage.Unknown unknown ->
+                    LOG.info("Received unknown GPG message: {}", unknown);
+            case GPGMessage.Invalid invalid -> LOG.info("Received invalid GPG message: {}", invalid);
         }
     }
 
@@ -309,6 +305,17 @@ class GameHandler {
         };
     }
 
+    boolean isJoinable() {
+        return details != null && switch (details.gameType()) {
+            case COOP, CUSTOM -> true;
+            default -> false;
+        } && state == State.LOBBY;
+    }
+
+    boolean passwordMatches(@Nullable String password) {
+        return details != null && (details.password() == null || details.password().equals(password));
+    }
+
     boolean isVisibleToPlayer(Player player) {
         if (details == null) {
             return false;
@@ -318,7 +325,7 @@ class GameHandler {
             return true;
         }
 
-        if (playerIds.contains(player.getId())) {
+        if (playerIdMap.containsKey(player.getId())) {
             return true;
         }
 
@@ -327,9 +334,7 @@ class GameHandler {
         }
 
         //TODO: check if 0 is appropriate
-        RatingRange ratingRange = details.ratingRange();
-        return !enforceRating ||
-               ratingRange.inRange(
+        return details.ratingRange().inRange(
                        player.getRating(details.leaderboard()).map(LeaderboardRating::displayedRating).orElse(0d));
     }
 
@@ -345,11 +350,11 @@ class GameHandler {
         };
         Map<Integer, Set<String>> teams = new HashMap<>();
         Set<GameInfo.Team> teamIds = new HashSet<>();
-        teamMap.forEach((teamId, players) -> {
-            teams.put(teamId, players.stream().map(GamePlayer::name).collect(Collectors.toSet()));
-            teamIds.add(
-                    new GameInfo.Team(teamId, players.stream().map(GamePlayer::playerId).collect(Collectors.toSet())));
-        });
+//        teamMap.forEach((teamId, players) -> {
+//            teams.put(teamId, players.stream().map(GamePlayer::name).collect(Collectors.toSet()));
+//            teamIds.add(
+//                    new GameInfo.Team(teamId, players.stream().map(GamePlayer::playerId).collect(Collectors.toSet())));
+//        });
 
         RatingRange ratingRange = details.ratingRange();
         return new GameInfo(gameId, title, details.host().name(), details.gameType(), 0, 0,

@@ -3,7 +3,6 @@ package com.faforever.server.player;
 import com.faforever.server.domain.LeaderboardRatingEntity;
 import com.faforever.server.domain.PlayerEntity;
 import com.faforever.server.game.GameStateTracker;
-import com.faforever.server.interceptor.cdi.MDCInterceptor;
 import com.faforever.server.interceptor.cdi.MDCPopulated;
 import com.faforever.server.message.service.PlayerSessionState;
 import com.faforever.server.micrometer.PlayerSessionStateResolver;
@@ -102,10 +101,7 @@ public class PlayerStateTracker {
 
     private void registerPlayerSession(long sessionId, int playerId,
                                        Duration secondsToExpiry) {
-        LOG.atDebug()
-           .addKeyValue(MDCInterceptor.SESSION_ID, sessionId)
-           .addKeyValue(MDCInterceptor.PLAYER_ID, playerId)
-           .log("Registering session");
+        LOG.debug("Registering session");
         Player player = playerIdMap.computeIfAbsent(playerId, key -> {
             PlayerEntity playerEntity = playerRepository.loadPlayer(key)
                                                         .orElseThrow(() -> new IllegalStateException(
@@ -137,10 +133,7 @@ public class PlayerStateTracker {
     }
 
     private void unregisterPlayerSession(long sessionId, int playerId) {
-        LOG.atInfo()
-           .addKeyValue(MDCInterceptor.SESSION_ID, sessionId)
-           .addKeyValue(MDCInterceptor.PLAYER_ID, playerId)
-           .log("Removing session");
+        LOG.debug("Removing session");
         playerIdMap.computeIfPresent(playerId, (_, player) -> {
             sessionExpirationMap.remove(sessionId);
 

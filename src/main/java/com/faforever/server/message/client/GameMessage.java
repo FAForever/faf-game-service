@@ -1,7 +1,5 @@
 package com.faforever.server.message.client;
 
-import com.faforever.server.game.Game;
-import com.faforever.server.game.GameDetails;
 import com.faforever.server.message.client.dto.Faction;
 import com.faforever.server.message.client.dto.GameAccess;
 import com.faforever.server.message.client.dto.GameInfo;
@@ -75,17 +73,6 @@ public sealed interface GameMessage {
         public List<String> args() {
             return List.of();
         }
-
-        public static GameLaunchResponse from(GameDetails gameDetails) {
-            LobbyMode lobbyMode = switch (gameDetails.gameType()) {
-                case COOP, CUSTOM, TUTORIAL -> LobbyMode.DEFAULT_LOBBY;
-                case MATCHMAKER, TOURNAMENT -> LobbyMode.AUTO_LOBBY;
-            };
-            new GameLaunchResponse(gameDetails.getId(), gameDetails.getTitle(), gameDetails.getFeaturedMod(),
-                    lobbyMode, gameDetails.getGameType(), gameDetails.getLeaderboard(), gameDetails.getMapName(), null, null, Map.of(),
-                    null, null);
-        }
-
     }
 
     record HostGameRequest(

@@ -63,7 +63,8 @@ public class LobbySchemaRegistrar {
 
     @Startup
     void registerSchemasAndSendSchemas() {
-
+        registerSchemasUsingTypeInfo(GameMessage.Client.class, LobbySchemaDetails.Direction.INBOUND, "game");
+        registerSchemasUsingTypeInfo(GameMessage.Server.class, LobbySchemaDetails.Direction.OUTBOUND, "game");
         sendSchemaDetails(Metadata.of());
     }
 

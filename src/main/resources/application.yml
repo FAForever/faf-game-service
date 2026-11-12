@@ -105,6 +105,8 @@ mp:
       category:
         "com.faforever":
           level: DEBUG
+        "io.smallrye.reactive.messaging.rabbitmq":
+          level: DEBUG
     hibernate-orm:
       log:
         sql: true

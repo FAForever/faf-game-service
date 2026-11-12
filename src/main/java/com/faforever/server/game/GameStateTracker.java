@@ -9,6 +9,7 @@ import com.faforever.server.player.Player;
 import com.faforever.server.player.PlayerStateTracker;
 import io.quarkus.scheduler.Scheduled;
 import io.smallrye.common.annotation.RunOnVirtualThread;
+import jakarta.annotation.Nullable;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -112,7 +113,7 @@ public class GameStateTracker {
         return new GameMessage.GameInfoList(visibleGames);
     }
 
-    void hostGame(long sessionId, String title, String mapName, boolean enforceRatingRange, GameDetails gameDetails) {
+    void hostGame(long sessionId, String title, String mapName, GameDetails gameDetails) {
         GameHandler gameHandler = gameHandlerInstance.get();
         sessionGameHandlerMap.put(sessionId, gameHandler);
         gameIdMap.put(gameHandler.getGameId(), gameHandler);
@@ -121,21 +122,46 @@ public class GameStateTracker {
             throw new IllegalStateException("Player not active");
         }
 
-        gameHandler.initializeDetails(title, mapName, enforceRatingRange, gameDetails);
+        gameHandler.initializeDetails(title, mapName, gameDetails);
 
         gameHandler.launch(
                 new LaunchDetails(sessionId, new GamePlayer(player.getId(), player.getUsername()), Map.of(), null, null,
                                   null, null));
     }
 
-    void joinGame(long sessionId, int gameId) {
-        GameHandler gameHandler = gameIdMap.get(gameId);
-        if (gameHandler == null) {
-            throw new IllegalStateException("Game does not exist");
-        }
+    void joinGame(long sessionId, int gameId, @Nullable String password) {
         Player player = playerStateTracker.getPlayerForSession(sessionId);
         if (player == null) {
             throw new IllegalStateException("Player not active");
+        }
+
+        GameHandler gameHandler = gameIdMap.get(gameId);
+        if (gameHandler == null) {
+            outboundEmitter.send(OutboundGameMessage.forSession(sessionId,
+                                                              new GameMessage.GameJoinFailed("host_left_game",
+                                                                                             gameId)));
+            return;
+        }
+
+        if (!gameHandler.isJoinable()) {
+            outboundEmitter.send(OutboundGameMessage.forSession(sessionId,
+                                                                new GameMessage.GameJoinFailed("game_not_ready",
+                                                                                               gameId)));
+            return;
+        }
+
+        if (!gameHandler.passwordMatches(password)) {
+            outboundEmitter.send(
+                    OutboundGameMessage.forSession(sessionId, new GameMessage.GameJoinFailed("bad_password", gameId)));
+            return;
+        }
+
+
+        if (!gameHandler.isVisibleToPlayer(player)) {
+            outboundEmitter.send(OutboundGameMessage.forSession(sessionId,
+                                                                new GameMessage.GameJoinFailed("not_eligible",
+                                                                                               gameId)));
+            return;
         }
 
         gameHandler.launch(

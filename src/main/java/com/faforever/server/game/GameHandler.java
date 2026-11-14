@@ -221,7 +221,7 @@ class GameHandler {
                         if (isHost && hostedAt == null) {
                             LOG.info("Hosting game");
                             gpgEmitter.send(OutboundGPGMessage.forSession(sessionId,
-                                                                          new GPGMessage.HostGame(List.of(mapName))));
+                                                                          new GPGMessage.HostGame(mapName)));
                             hostedAt = Instant.now();
                             gameStateTracker.markDirty(this);
                         }

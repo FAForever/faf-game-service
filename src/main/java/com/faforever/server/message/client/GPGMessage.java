@@ -10,6 +10,7 @@ import com.faforever.server.message.client.dto.SlotOption;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.annotation.JsonTypeName;
@@ -26,10 +27,17 @@ public sealed interface GPGMessage {
             @JsonProperty("args")
             @JsonDeserialize(using = GPGMessageDeserializer.class)
             T content
-    ) {}
+    ) {
+        @JsonProperty("target")
+        public String target() {
+            return "game";
+        }
+    }
 
     @JsonTypeInfo(use = JsonTypeInfo.Id.SIMPLE_NAME, property = "command")
-    @JsonSubTypes({@JsonSubTypes.Type(value = HostGame.class),
+    @JsonSubTypes({
+            @JsonSubTypes.Type(value = HostGame.class),
+            @JsonSubTypes.Type(value = IceMsg.class),
 
     })
     sealed interface Server extends GPGMessage {}
@@ -206,11 +214,14 @@ public sealed interface GPGMessage {
         }
     }
 
+    // IceMsg is both a client and a server message; without this it inherits Server's @JsonTypeInfo, which makes
+    // binding its args array expect a type id. Wrapped and OutboundGPGMessage still write the command for it.
+    @JsonTypeInfo(use = JsonTypeInfo.Id.NONE)
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record IceMsg(
             int receiverId,
             String iceMessage
-    ) implements Client {}
+    ) implements Client, Server {}
 
     /**
      * End-of-game army statistics, sent once by every client that is not watching a replay. The single arg is a JSON
@@ -306,7 +317,27 @@ public sealed interface GPGMessage {
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record HostGame(
-            List<Object> args
+            String mapName
     ) implements Server {}
+
+    @JsonFormat(shape = JsonFormat.Shape.ARRAY)
+    record JoinGame(
+            String playerName,
+            int playerId
+    ) implements Server {}
+
+    @JsonFormat(shape = JsonFormat.Shape.ARRAY)
+    record ConnectToPeer(
+            String playerName,
+            int playerId,
+            boolean offer
+    ) implements Server {}
+
+
+    @JsonFormat(shape = JsonFormat.Shape.ARRAY)
+    record DisconnectFromPeer(
+            int playerId
+    ) implements Server {}
+
 
 }

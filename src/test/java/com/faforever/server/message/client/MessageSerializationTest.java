@@ -21,6 +21,7 @@ import org.skyscreamer.jsonassert.JSONCompareMode;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -31,6 +32,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusComponentTest({JsonMapperProducer.class, JacksonCustomizer.class})
@@ -39,31 +41,27 @@ class MessageSerializationTest {
     @Inject
     JsonMapper jsonMapper;
 
-    private String serializeServer(GameMessage.Server message) {
-        return jsonMapper.writerFor(GameMessage.Server.class).writeValueAsString(message);
+    private String serializeGameServer(GameMessage.Server message) {
+        return jsonMapper.writeValueAsString(message);
     }
 
-    private String serializeGPGServer(GPGMessage.Wrapped<GPGMessage.Server> message) {
-        return jsonMapper.writerFor(GameMessage.Server.class).writeValueAsString(message);
-    }
-
-    private GameMessage.Client deserializeClient(String json) {
+    private GameMessage.Client deserializeGameClient(String json) {
         return jsonMapper.readValue(json, GameMessage.Client.class);
     }
 
-    private GPGMessage.Wrapped<GPGMessage.Client> deserializeGPGClient(String json) {
-        return jsonMapper.readValue(json, new TypeReference<>() {});
+    private String serializeGPGServer(GPGMessage.Server message) {
+        return jsonMapper.writeValueAsString(new GPGMessage.Wrapped<>(message));
     }
 
-    private GPGMessage.Client deserializeGPGClientContent(String json) {
-        return deserializeGPGClient(json).content();
+    private GPGMessage.Client deserializeGPGClient(String json) {
+        return jsonMapper.<GPGMessage.Wrapped<GPGMessage.Client>>readValue(json, new TypeReference<>() {}).content();
     }
 
     // ---- Server messages ----
 
     @Test
     void serializeGameJoinFailed() throws JSONException {
-        String json = serializeServer(new GameMessage.GameJoinFailed("Game is full", 42));
+        String json = serializeGameServer(new GameMessage.GameJoinFailed("Game is full", 42));
 
         JSONAssert.assertEquals("""
                                 {
@@ -76,7 +74,7 @@ class MessageSerializationTest {
 
     @Test
     void serializeGameLaunchResponse() throws JSONException {
-        String json = serializeServer(
+        String json = serializeGameServer(
                 new GameMessage.GameLaunchResponse(7, "Test Game", "faf", LobbyMode.AUTO_LOBBY, GameType.MATCHMAKER,
                                                    "ladder_1v1", "scmp_007", 2, 2, Map.of("Share", "ShareUntilDeath"),
                                                    1, Faction.CYBRAN));
@@ -103,7 +101,7 @@ class MessageSerializationTest {
 
     @Test
     void serializeGameLaunchResponseWithNulls() throws JSONException {
-        String json = serializeServer(
+        String json = serializeGameServer(
                 new GameMessage.GameLaunchResponse(7, "Test Game", "faf", LobbyMode.DEFAULT_LOBBY, GameType.CUSTOM,
                                                    "global", "scmp_007", null, null, Map.of(), null, null));
 
@@ -135,7 +133,7 @@ class MessageSerializationTest {
                                          OffsetDateTime.of(2026, 1, 2, 3, 4, 5, 0, ZoneOffset.UTC).toInstant(),
                                          1767323045L, "global", 800, 1200, true, Map.of(), Set.of());
 
-        String json = serializeServer(new GameMessage.GameInfoList(List.of(gameInfo)));
+        String json = serializeGameServer(new GameMessage.GameInfoList(List.of(gameInfo)));
 
         JSONAssert.assertEquals("""
                                 {
@@ -172,7 +170,7 @@ class MessageSerializationTest {
 
     @Test
     void serializeEmptyGameInfoList() throws JSONException {
-        String json = serializeServer(new GameMessage.GameInfoList(List.of()));
+        String json = serializeGameServer(new GameMessage.GameInfoList(List.of()));
 
         JSONAssert.assertEquals("""
                                 {"command": "game_info", "games": []}
@@ -183,23 +181,23 @@ class MessageSerializationTest {
 
     @Test
     void deserializeHostGameRequest() {
-        GameMessage.Client message = deserializeClient("""
-                                                       {
-                                                         "command": "game_host",
-                                                         "request_id": "req-1",
-                                                         "mapname": "scmp_007",
-                                                         "title": "Test Game",
-                                                         "mod": "faf",
-                                                         "options": [true, false],
-                                                         "version": 3,
-                                                         "access": "password",
-                                                         "password": "secret",
-                                                         "visibility": "friends",
-                                                         "rating_min": 800,
-                                                         "rating_max": 1200,
-                                                         "enforce_rating_range": true
-                                                       }
-                                                       """);
+        GameMessage.Client message = deserializeGameClient("""
+                                                           {
+                                                             "command": "game_host",
+                                                             "request_id": "req-1",
+                                                             "mapname": "scmp_007",
+                                                             "title": "Test Game",
+                                                             "mod": "faf",
+                                                             "options": [true, false],
+                                                             "version": 3,
+                                                             "access": "password",
+                                                             "password": "secret",
+                                                             "visibility": "friends",
+                                                             "rating_min": 800,
+                                                             "rating_max": 1200,
+                                                             "enforce_rating_range": true
+                                                           }
+                                                           """);
 
         assertThat(message, instanceOf(GameMessage.HostGameRequest.class));
         GameMessage.HostGameRequest request = (GameMessage.HostGameRequest) message;
@@ -220,16 +218,16 @@ class MessageSerializationTest {
 
     @Test
     void deserializeHostGameRequestWithOptionalFieldsAbsent() {
-        GameMessage.Client message = deserializeClient("""
-                                                       {
-                                                         "command": "game_host",
-                                                         "request_id": "req-2",
-                                                         "title": "Test Game",
-                                                         "access": "public",
-                                                         "visibility": "public",
-                                                         "enforce_rating_range": false
-                                                       }
-                                                       """);
+        GameMessage.Client message = deserializeGameClient("""
+                                                           {
+                                                             "command": "game_host",
+                                                             "request_id": "req-2",
+                                                             "title": "Test Game",
+                                                             "access": "public",
+                                                             "visibility": "public",
+                                                             "enforce_rating_range": false
+                                                           }
+                                                           """);
 
         GameMessage.HostGameRequest request = (GameMessage.HostGameRequest) message;
         assertThat(request.mapName(), nullValue());
@@ -243,9 +241,9 @@ class MessageSerializationTest {
 
     @Test
     void deserializeJoinGameRequest() {
-        GameMessage.Client message = deserializeClient("""
-                                                       {"command": "game_join", "request_id": "req-3", "uid": 42, "password": "secret"}
-                                                       """);
+        GameMessage.Client message = deserializeGameClient("""
+                                                           {"command": "game_join", "request_id": "req-3", "uid": 42, "password": "secret"}
+                                                           """);
 
         assertThat(message, is(new GameMessage.JoinGameRequest("req-3", 42, "secret")));
         assertThat(message.command(), is(GameMessage.JoinGameRequest.COMMAND));
@@ -253,18 +251,18 @@ class MessageSerializationTest {
 
     @Test
     void deserializeJoinGameRequestWithoutPassword() {
-        GameMessage.Client message = deserializeClient("""
-                                                       {"command": "game_join", "request_id": "req-4", "uid": 42}
-                                                       """);
+        GameMessage.Client message = deserializeGameClient("""
+                                                           {"command": "game_join", "request_id": "req-4", "uid": 42}
+                                                           """);
 
         assertThat(message, is(new GameMessage.JoinGameRequest("req-4", 42, null)));
     }
 
     @Test
     void deserializeRestoreGameSessionRequest() {
-        GameMessage.Client message = deserializeClient("""
-                                                       {"command": "restore_game_session", "request_id": "req-5", "game_id": 42}
-                                                       """);
+        GameMessage.Client message = deserializeGameClient("""
+                                                           {"command": "restore_game_session", "request_id": "req-5", "game_id": 42}
+                                                           """);
 
         assertThat(message, is(new GameMessage.RestoreGameSessionRequest("req-5", 42)));
         assertThat(message.command(), is(GameMessage.RestoreGameSessionRequest.COMMAND));
@@ -277,7 +275,7 @@ class MessageSerializationTest {
 
         for (GameMessage.Client message : messages) {
             String json = jsonMapper.writerFor(GameMessage.Client.class).writeValueAsString(message);
-            assertThat(deserializeClient(json), is(message));
+            assertThat(deserializeGameClient(json), is(message));
         }
     }
 
@@ -285,94 +283,92 @@ class MessageSerializationTest {
 
     @Test
     void deserializeGPGGameState() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameState", "target": "game", "args": ["Idle"]}
-                                               """),
-                   is(new GPGMessage.GameState(GPGMessage.GameState.State.Known.IDLE)));
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameState", "target": "game", "args": ["Lobby"]}
-                                               """),
-                   is(new GPGMessage.GameState(GPGMessage.GameState.State.Known.LOBBY)));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameState", "target": "game", "args": ["Idle"]}
+                                        """), is(new GPGMessage.GameState(GPGMessage.GameState.State.Known.IDLE)));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameState", "target": "game", "args": ["Lobby"]}
+                                        """), is(new GPGMessage.GameState(GPGMessage.GameState.State.Known.LOBBY)));
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameState", "target": "game", "args": ["Launching"]}
-                                               """),
-                   is(new GPGMessage.GameState(GPGMessage.GameState.State.Known.LAUNCHING)));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameState", "target": "game", "args": ["Launching"]}
+                                        """), is(new GPGMessage.GameState(GPGMessage.GameState.State.Known.LAUNCHING)));
     }
 
     @Test
     void deserializeGPGGameStateUnknownValue() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameState", "target": "game", "args": ["Ended"]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameState", "target": "game", "args": ["Ended"]}
+                                        """),
                    is(new GPGMessage.GameState(new GPGMessage.GameState.State.Unknown("Ended"))));
     }
 
     @Test
     void deserializeGPGGameOptionWithStringValue() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameOption", "target": "game", "args": ["Victory", "demoralization"]}
-                                               """),
-                   is(new GameOption.Victory(GameOption.Victory.Known.DEMORALIZATION)));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameOption", "target": "game", "args": ["Victory", "demoralization"]}
+                                        """), is(new GameOption.Victory(GameOption.Victory.Known.DEMORALIZATION)));
     }
 
     @Test
     void deserializeGPGGameOptionScenarioFile() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameOption", "target": "game", "args": ["ScenarioFile", "/maps/scmp_009/scmp_009_scenario.lua"]}
-                                               """), is(new GameOption.Other("ScenarioFile", new OptionValue.Str(
-                "/maps/scmp_009/scmp_009_scenario.lua"))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameOption", "target": "game", "args": ["ScenarioFile", "/maps/scmp_009/scmp_009_scenario.lua"]}
+                                        """),
+                   is(new GameOption.ScenarioFile(Path.of("/maps", "scmp_009", "scmp_009_scenario.lua"))));
+    }
+
+    @Test
+    void deserializeGPGGameOptionScore() {
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameOption", "target": "game", "args": ["Score", "no"]}
+                                        """), is(new GameOption.Other("Score", new OptionValue.Str("no"))));
     }
 
     @Test
     void deserializeGPGGameOptionWithIntValue() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameOption", "target": "game", "args": ["Slots", 8]}
-                                               """), is(new GameOption.Other("Slots", new OptionValue.Int(8))));
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameOption", "target": "game", "args": ["RestrictedCategories", 0]}
-                                               """),
-                   is(new GameOption.Other("RestrictedCategories", new OptionValue.Int(0))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameOption", "target": "game", "args": ["Slots", 8]}
+                                        """), is(new GameOption.Other("Slots", new OptionValue.Int(8))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameOption", "target": "game", "args": ["RestrictedCategories", 0]}
+                                        """), is(new GameOption.Other("RestrictedCategories", new OptionValue.Int(0))));
     }
 
     @Test
     void deserializeGPGPlayerOption() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "PlayerOption", "target": "game", "args": ["123456", "Faction", 2]}
-                                               """),
-                   is(new GPGMessage.PlayerOption(123456, new SlotOption.Faction(2))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "PlayerOption", "target": "game", "args": ["123456", "Faction", 2]}
+                                        """), is(new GPGMessage.PlayerOption(123456, new SlotOption.Faction(2))));
     }
 
     @Test
     void deserializeGPGPlayerOptionObserverStartSpot() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "PlayerOption", "target": "game", "args": ["123456", "StartSpot", -1]}
-                                               """),
-                   is(new GPGMessage.PlayerOption(123456, new SlotOption.Slot(-1))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "PlayerOption", "target": "game", "args": ["123456", "StartSpot", -1]}
+                                        """), is(new GPGMessage.PlayerOption(123456, new SlotOption.Slot(-1))));
     }
 
     @Test
     void deserializeGPGPlayerOptionWithStringValue() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "PlayerOption", "target": "game", "args": ["123456", "PlayerColor", "1"]}
-                                               """),
-                   is(new GPGMessage.PlayerOption(123456, new SlotOption.Color(1))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "PlayerOption", "target": "game", "args": ["123456", "PlayerColor", "1"]}
+                                        """), is(new GPGMessage.PlayerOption(123456, new SlotOption.Color(1))));
     }
 
     @Test
     void deserializeGPGAIOption() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "AIOption", "target": "game", "args": ["AI: Adaptive", "Team", 3]}
-                                               """),
-                   is(new GPGMessage.AIOption("AI: Adaptive", new SlotOption.Team(3))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "AIOption", "target": "game", "args": ["AI: Adaptive", "Team", 3]}
+                                        """), is(new GPGMessage.AIOption("AI: Adaptive", new SlotOption.Team(3))));
     }
 
     // ---- Game options, per faf-re docs/GPGNET_MESSAGES.md "GameOption" ----
 
     private GPGMessage.Client deserializeGameOption(String key, Object value) {
-        return deserializeGPGClientContent(jsonMapper.writeValueAsString(
+        return deserializeGPGClient(jsonMapper.writeValueAsString(
                 Map.of("command", "GameOption", "target", "game", "args", List.of(key, value))));
     }
 
@@ -384,11 +380,11 @@ class MessageSerializationTest {
 
     @Test
     void deserializeGameOptionVictoryKnownValues() {
-        Map<String, GameOption.Victory.Known> expected = Map.of(
-                "demoralization", GameOption.Victory.Known.DEMORALIZATION,
-                "domination", GameOption.Victory.Known.DOMINATION,
-                "eradication", GameOption.Victory.Known.ERADICATION,
-                "sandbox", GameOption.Victory.Known.SANDBOX);
+        Map<String, GameOption.Victory.Known> expected = Map.of("demoralization",
+                                                                GameOption.Victory.Known.DEMORALIZATION, "domination",
+                                                                GameOption.Victory.Known.DOMINATION, "eradication",
+                                                                GameOption.Victory.Known.ERADICATION, "sandbox",
+                                                                GameOption.Victory.Known.SANDBOX);
 
         expected.forEach((value, known) -> assertThat(deserializeGameOption("Victory", value),
                                                       is(new GameOption.Victory(known))));
@@ -433,26 +429,37 @@ class MessageSerializationTest {
      * The server treats false, "false", "off", "no" and 0 as disabled, case-insensitively; the matching enabled
      * values are accepted as well. Values may arrive as strings or as ints (booleans are sent as 1/0).
      */
-    private static final Map<Object, Boolean> TOGGLE_VALUES = Map.ofEntries(
-            Map.entry("true", true), Map.entry("TRUE", true), Map.entry("on", true), Map.entry("On", true),
-            Map.entry("yes", true), Map.entry("Yes", true), Map.entry("1", true), Map.entry(1, true),
-            Map.entry("false", false), Map.entry("False", false), Map.entry("off", false), Map.entry("Off", false),
-            Map.entry("no", false), Map.entry("No", false), Map.entry("0", false), Map.entry(0, false));
+    private static final Map<Object, Boolean> TOGGLE_VALUES = Map.ofEntries(Map.entry("true", true),
+                                                                            Map.entry("TRUE", true),
+                                                                            Map.entry("on", true),
+                                                                            Map.entry("On", true),
+                                                                            Map.entry("yes", true),
+                                                                            Map.entry("Yes", true),
+                                                                            Map.entry("1", true), Map.entry(1, true),
+                                                                            Map.entry("false", false),
+                                                                            Map.entry("False", false),
+                                                                            Map.entry("off", false),
+                                                                            Map.entry("Off", false),
+                                                                            Map.entry("no", false),
+                                                                            Map.entry("No", false),
+                                                                            Map.entry("0", false), Map.entry(0, false));
 
     @Test
     void deserializeGameOptionUnrankedAcceptsToggleValues() {
-        TOGGLE_VALUES.forEach((value, enabled) -> assertThat(
-                String.valueOf(value), deserializeGameOption("Unranked", value),
-                is(new GameOption.Unranked(
-                        enabled ? GameOption.Unranked.Known.TRUE : GameOption.Unranked.Known.FALSE))));
+        TOGGLE_VALUES.forEach(
+                (value, enabled) -> assertThat(String.valueOf(value), deserializeGameOption("Unranked", value),
+                                               is(new GameOption.Unranked(enabled ?
+                                                                          GameOption.Unranked.Known.TRUE :
+                                                                          GameOption.Unranked.Known.FALSE))));
     }
 
     @Test
     void deserializeGameOptionCheatsEnabledAcceptsToggleValues() {
-        TOGGLE_VALUES.forEach((value, enabled) -> assertThat(
-                String.valueOf(value), deserializeGameOption("CheatsEnabled", value),
-                is(new GameOption.CheatsEnabled(
-                        enabled ? GameOption.CheatsEnabled.Known.TRUE : GameOption.CheatsEnabled.Known.FALSE))));
+        TOGGLE_VALUES.forEach(
+                (value, enabled) -> assertThat(String.valueOf(value), deserializeGameOption("CheatsEnabled", value),
+                                               is(new GameOption.CheatsEnabled(enabled ?
+                                                                               GameOption.CheatsEnabled.Known.TRUE :
+                                                                               GameOption.CheatsEnabled.Known.FALSE))));
     }
 
     @Test
@@ -525,16 +532,16 @@ class MessageSerializationTest {
 
     @Test
     void deserializeGameOptionShare() {
-        Map<String, GameOption.Share.Known> expected = Map.of(
-                "FullShare", GameOption.Share.Known.FULL_SHARE,
-                "ShareUntilDeath", GameOption.Share.Known.SHARE_UNTIL_DEATH,
-                "PartialShare", GameOption.Share.Known.PARTIAL_SHARE,
-                "TransferToKiller", GameOption.Share.Known.TRANSFER_TO_KILLER,
-                "Defectors", GameOption.Share.Known.DEFECTORS,
-                "CivilianDesert", GameOption.Share.Known.CIVILIAN_DESERT);
+        Map<String, GameOption.Share.Known> expected = Map.of("FullShare", GameOption.Share.Known.FULL_SHARE,
+                                                              "ShareUntilDeath",
+                                                              GameOption.Share.Known.SHARE_UNTIL_DEATH, "PartialShare",
+                                                              GameOption.Share.Known.PARTIAL_SHARE, "TransferToKiller",
+                                                              GameOption.Share.Known.TRANSFER_TO_KILLER, "Defectors",
+                                                              GameOption.Share.Known.DEFECTORS, "CivilianDesert",
+                                                              GameOption.Share.Known.CIVILIAN_DESERT);
 
-        expected.forEach((value, known) -> assertThat(deserializeGameOption("Share", value),
-                                                      is(new GameOption.Share(known))));
+        expected.forEach(
+                (value, known) -> assertThat(deserializeGameOption("Share", value), is(new GameOption.Share(known))));
         assertThat(deserializeGameOption("Share", "NoShare"),
                    is(new GameOption.Share(new GameOption.Unknown("NoShare"))));
     }
@@ -570,44 +577,56 @@ class MessageSerializationTest {
     // ---- Slot options (PlayerOption / AIOption), per faf-re docs/GPGNET_MESSAGES.md "PlayerOption" ----
 
     private GPGMessage.Client deserializePlayerOption(String key, Object value) {
-        return deserializeGPGClientContent(jsonMapper.writeValueAsString(
+        return deserializeGPGClient(jsonMapper.writeValueAsString(
                 Map.of("command", "PlayerOption", "target", "game", "args", List.of("123456", key, value))));
     }
 
     private GPGMessage.Client deserializeAIOption(String key, Object value) {
-        return deserializeGPGClientContent(jsonMapper.writeValueAsString(
+        return deserializeGPGClient(jsonMapper.writeValueAsString(
                 Map.of("command", "AIOption", "target", "game", "args", List.of("AI: Adaptive", key, value))));
     }
 
     /**
      * Every documented slot key, with the value as the lobby sends it, and the option it should map to.
      */
-    private static final Map<List<Object>, SlotOption> DOCUMENTED_SLOT_OPTIONS = Map.of(
-            List.of("Faction", 2), new SlotOption.Faction(2),
-            List.of("Faction", 5), new SlotOption.Faction(5), // slot-local index; the last means random
-            List.of("Color", 3), new SlotOption.Color(3),
-            List.of("PlayerColor", 3), new SlotOption.Color(3),
-            List.of("Team", 2), new SlotOption.Team(2),
-            List.of("Team", -1), new SlotOption.Team(-1), // observers
-            List.of("StartSpot", 4), new SlotOption.Slot(4),
-            List.of("StartSpot", -2), new SlotOption.Slot(-2), // observers: -(observer index)
-            List.of("Army", 1), new SlotOption.Other("Army", new OptionValue.Int(1)),
-            List.of("Ready", 1), new SlotOption.Other("Ready", new OptionValue.Int(1)));
+    private static final Map<List<Object>, SlotOption> DOCUMENTED_SLOT_OPTIONS = Map.of(List.of("Faction", 2),
+                                                                                        new SlotOption.Faction(2),
+                                                                                        List.of("Faction", 5),
+                                                                                        new SlotOption.Faction(
+                                                                                                5), // slot-local index; the last means random
+                                                                                        List.of("Color", 3),
+                                                                                        new SlotOption.Color(3),
+                                                                                        List.of("PlayerColor", 3),
+                                                                                        new SlotOption.Color(3),
+                                                                                        List.of("Team", 2),
+                                                                                        new SlotOption.Team(2),
+                                                                                        List.of("Team", -1),
+                                                                                        new SlotOption.Team(
+                                                                                                -1), // observers
+                                                                                        List.of("StartSpot", 4),
+                                                                                        new SlotOption.Slot(4),
+                                                                                        List.of("StartSpot", -2),
+                                                                                        new SlotOption.Slot(
+                                                                                                -2), // observers: -(observer index)
+                                                                                        List.of("Army", 1),
+                                                                                        new SlotOption.Other("Army",
+                                                                                                             new OptionValue.Int(
+                                                                                                                     1)),
+                                                                                        List.of("Ready", 1),
+                                                                                        new SlotOption.Other("Ready",
+                                                                                                             new OptionValue.Int(
+                                                                                                                     1)));
 
     @Test
     void deserializePlayerOptionDocumentedKeys() {
-        DOCUMENTED_SLOT_OPTIONS.forEach((keyValue, option) -> assertThat(
-                keyValue.toString(),
-                deserializePlayerOption((String) keyValue.getFirst(), keyValue.get(1)),
-                is(new GPGMessage.PlayerOption(123456, option))));
+        DOCUMENTED_SLOT_OPTIONS.forEach((keyValue, option) -> assertThat(keyValue.toString(), deserializePlayerOption(
+                (String) keyValue.getFirst(), keyValue.get(1)), is(new GPGMessage.PlayerOption(123456, option))));
     }
 
     @Test
     void deserializeAIOptionDocumentedKeys() {
-        DOCUMENTED_SLOT_OPTIONS.forEach((keyValue, option) -> assertThat(
-                keyValue.toString(),
-                deserializeAIOption((String) keyValue.getFirst(), keyValue.get(1)),
-                is(new GPGMessage.AIOption("AI: Adaptive", option))));
+        DOCUMENTED_SLOT_OPTIONS.forEach((keyValue, option) -> assertThat(keyValue.toString(), deserializeAIOption(
+                (String) keyValue.getFirst(), keyValue.get(1)), is(new GPGMessage.AIOption("AI: Adaptive", option))));
     }
 
     @Test
@@ -628,12 +647,15 @@ class MessageSerializationTest {
 
     @Test
     void deserializeSlotOptionUnknownKeyAsOther() {
-        assertThat(deserializePlayerOption("PlayerName", "Player1"),
-                   is(new GPGMessage.PlayerOption(123456,
-                                                  new SlotOption.Other("PlayerName", new OptionValue.Str("Player1")))));
-        assertThat(deserializeAIOption("Difficulty", 3),
-                   is(new GPGMessage.AIOption("AI: Adaptive",
-                                              new SlotOption.Other("Difficulty", new OptionValue.Int(3)))));
+        assertThat(deserializePlayerOption("PlayerName", "Player1"), is(new GPGMessage.PlayerOption(123456,
+                                                                                                    new SlotOption.Other(
+                                                                                                            "PlayerName",
+                                                                                                            new OptionValue.Str(
+                                                                                                                    "Player1")))));
+        assertThat(deserializeAIOption("Difficulty", 3), is(new GPGMessage.AIOption("AI: Adaptive",
+                                                                                    new SlotOption.Other("Difficulty",
+                                                                                                         new OptionValue.Int(
+                                                                                                                 3)))));
     }
 
     @Test
@@ -655,65 +677,64 @@ class MessageSerializationTest {
     @Test
     void deserializeGPGClearSlot() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "ClearSlot", "target": "game", "args": [3]}
-                                               """), is(new GPGMessage.ClearSlot(3)));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "ClearSlot", "target": "game", "args": [3]}
+                                        """), is(new GPGMessage.ClearSlot(3)));
     }
 
     @Test
     void deserializeGPGGameModsActivated() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameMods", "target": "game", "args": ["activated", 1]}
-                                               """), is(new GPGMessage.GameMods.Activated(1)));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameMods", "target": "game", "args": ["activated", 1]}
+                                        """), is(new GPGMessage.GameMods.Activated(1)));
     }
 
     @Test
     void deserializeGPGGameModsUids() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameMods", "target": "game", "args": ["uids", "e7846e9b-23a4-4b95-ae3a-fb69b289a585"]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameMods", "target": "game", "args": ["uids", "e7846e9b-23a4-4b95-ae3a-fb69b289a585"]}
+                                        """),
                    is(new GPGMessage.GameMods.Uids(List.of("e7846e9b-23a4-4b95-ae3a-fb69b289a585"))));
     }
 
     @Test
     void deserializeGPGGameModsMultipleUidsAreSpaceSeparated() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameMods", "target": "game", "args": ["uids", "uid-a uid-b uid-c"]}
-                                               """),
-                   is(new GPGMessage.GameMods.Uids(List.of("uid-a", "uid-b", "uid-c"))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameMods", "target": "game", "args": ["uids", "uid-a uid-b uid-c"]}
+                                        """), is(new GPGMessage.GameMods.Uids(List.of("uid-a", "uid-b", "uid-c"))));
     }
 
     @Test
     void deserializeGPGGameFull() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameFull", "target": "game", "args": []}
-                                               """), is(new GPGMessage.GameFull()));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameFull", "target": "game", "args": []}
+                                        """), is(new GPGMessage.GameFull()));
     }
 
     @Test
     void deserializeGPGChat() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Chat", "target": "game", "args": ["gl hf"]}
-                                               """), is(new GPGMessage.Chat("gl hf")));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Chat", "target": "game", "args": ["gl hf"]}
+                                        """), is(new GPGMessage.Chat("gl hf")));
     }
 
     @Test
     void deserializeGPGDisconnected() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Disconnected", "target": "game", "args": ["123456"]}
-                                               """), is(new GPGMessage.Disconnected("123456")));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Disconnected", "target": "game", "args": ["123456"]}
+                                        """), is(new GPGMessage.Disconnected("123456")));
     }
 
     @Test
     void deserializeGPGLaunchStatus() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "LaunchStatus", "target": "game", "args": ["Ready"]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "LaunchStatus", "target": "game", "args": ["Ready"]}
+                                        """),
                    is(new GPGMessage.LaunchStatus(GPGMessage.LaunchStatus.Status.Known.READY)));
     }
 
@@ -732,43 +753,43 @@ class MessageSerializationTest {
                                                                       "Rejected",
                                                                       GPGMessage.LaunchStatus.Status.Known.REJECTED);
 
-        expected.forEach((wireValue, status) -> assertThat(deserializeGPGClientContent("""
-                                                                                       {"command": "LaunchStatus", "target": "game", "args": ["%s"]}
-                                                                                       """.formatted(wireValue)),
+        expected.forEach((wireValue, status) -> assertThat(deserializeGPGClient("""
+                                                                                {"command": "LaunchStatus", "target": "game", "args": ["%s"]}
+                                                                                """.formatted(wireValue)),
                                                            is(new GPGMessage.LaunchStatus(status))));
     }
 
     @Test
     void deserializeGPGLaunchStatusUnknownValue() {
         // "Failed" is in the documented enum but has no Known constant
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "LaunchStatus", "target": "game", "args": ["Failed"]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "LaunchStatus", "target": "game", "args": ["Failed"]}
+                                        """),
                    is(new GPGMessage.LaunchStatus(new GPGMessage.LaunchStatus.Status.Unknown("Failed"))));
     }
 
     @Test
     void deserializeGPGEstablishedPeer() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "EstablishedPeer", "target": "game", "args": ["123456"]}
-                                               """), is(new GPGMessage.EstablishedPeer("123456")));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "EstablishedPeer", "target": "game", "args": ["123456"]}
+                                        """), is(new GPGMessage.EstablishedPeer("123456")));
     }
 
     @Test
     void deserializeGPGDisconnectedPeer() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "DisconnectedPeer", "target": "game", "args": ["123456"]}
-                                               """), is(new GPGMessage.DisconnectedPeer("123456")));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "DisconnectedPeer", "target": "game", "args": ["123456"]}
+                                        """), is(new GPGMessage.DisconnectedPeer("123456")));
     }
 
     @Test
     void deserializeGPGGameResult() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameResult", "target": "game", "args": [1, "victory 10"]}
-                                               """), is(new GPGMessage.GameResult(1, "victory 10")));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameResult", "target": "game", "args": [1, "victory 10"]}
+                                        """), is(new GPGMessage.GameResult(1, "victory 10")));
     }
 
     /**
@@ -797,8 +818,8 @@ class MessageSerializationTest {
                                                      }""";
 
     private GPGMessage.Client deserializeIceMsg(Object... args) {
-        return deserializeGPGClientContent(jsonMapper.writeValueAsString(
-                Map.of("command", "IceMsg", "target", "game", "args", List.of(args))));
+        return deserializeGPGClient(
+                jsonMapper.writeValueAsString(Map.of("command", "IceMsg", "target", "game", "args", List.of(args))));
     }
 
     @Test
@@ -838,8 +859,8 @@ class MessageSerializationTest {
     /**
      * Wraps a JsonStats payload document in the GPG envelope, where it travels as a single string arg.
      */
-    private GPGMessage.Client deserializeGPGJsonStatsContent(String payloadJson) {
-        return deserializeGPGClientContent(jsonMapper.writeValueAsString(
+    private GPGMessage.JsonStats deserializeGPGJsonStatsContent(String payloadJson) {
+        return (GPGMessage.JsonStats) deserializeGPGClient(jsonMapper.writeValueAsString(
                 Map.of("command", "JsonStats", "target", "game", "args", List.of(payloadJson))));
     }
 
@@ -984,7 +1005,7 @@ class MessageSerializationTest {
     void deserializeGPGJsonStatsWithCivilianGapDefeatedAndAi() {
         // A civilian army between two players leaves a null; Defeated appears once an army is defeated;
         // blueprints is optional
-        GPGMessage.Client message = deserializeGPGJsonStatsContent("""
+        GPGMessage.JsonStats message = deserializeGPGJsonStatsContent("""
                                                                    {
                                                                    	"stats": [
                                                                    		{
@@ -1014,7 +1035,7 @@ class MessageSerializationTest {
                                                                    """);
 
         assertThat(message, instanceOf(GPGMessage.JsonStats.class));
-        List<JsonStatsPayload.ArmyStats> stats = ((GPGMessage.JsonStats) message).payload().stats();
+        List<JsonStatsPayload.ArmyStats> stats = message.payload().stats();
         assertThat(stats.size(), is(3));
         assertThat(stats.getFirst().faction(), is(Faction.SERAPHIM));
         assertThat(stats.getFirst().defeated(), is(-1.0));
@@ -1027,28 +1048,29 @@ class MessageSerializationTest {
 
     @Test
     void deserializeGPGJsonStatsUnknownBrainType() {
-        GPGMessage.Client message = deserializeGPGJsonStatsContent("""
-                                                                   {
-                                                                   	"stats": [
-                                                                   		{
-                                                                   			"name": "Player1",
-                                                                   			"type": "Spectator",
-                                                                   			"faction": 1,
-                                                                   			"general": {},
-                                                                   			"units": {},
-                                                                   			"resources": {}
-                                                                   		}
-                                                                   	]
-                                                                   }""");
+        GPGMessage.JsonStats message = deserializeGPGJsonStatsContent("""
+                                                                      {
+                                                                      	"stats": [
+                                                                      		{
+                                                                      			"name": "Player1",
+                                                                      			"type": "Spectator",
+                                                                      			"faction": 1,
+                                                                      			"general": {},
+                                                                      			"units": {},
+                                                                      			"resources": {}
+                                                                      		}
+                                                                      	]
+                                                                      }""");
 
-        assertThat(((GPGMessage.JsonStats) message).payload().stats().getFirst().type(),
-                   is(new JsonStatsPayload.BrainType.Unknown("Spectator")));
+        JsonStatsPayload.ArmyStats armyStats = message.payload().stats().getFirst();
+        assertThat(armyStats, notNullValue());
+        assertThat(armyStats.type(), is(new JsonStatsPayload.BrainType.Unknown("Spectator")));
     }
 
     @Test
     void deserializeGPGJsonStatsIgnoresUnknownFields() {
         // Fields the doc doesn't list (e.g. from a newer game build) must not invalidate the stats
-        GPGMessage.Client message = deserializeGPGJsonStatsContent("""
+        GPGMessage.JsonStats message = deserializeGPGJsonStatsContent("""
                                                                    {
                                                                    	"version": 2,
                                                                    	"stats": [
@@ -1100,7 +1122,8 @@ class MessageSerializationTest {
                                                                    """);
 
         assertThat(message, instanceOf(GPGMessage.JsonStats.class));
-        JsonStatsPayload.ArmyStats army = ((GPGMessage.JsonStats) message).payload().stats().getFirst();
+        JsonStatsPayload.ArmyStats army = message.payload().stats().getFirst();
+        assertThat(army, notNullValue());
         assertThat(army.general().score(), is(10));
         assertThat(army.general().kills(), is(new JsonStatsPayload.CountMassEnergy(1, 2.0, 3.0)));
         assertThat(army.units(), is(Map.of("land", new JsonStatsPayload.KillsBuiltLost(1, 2, 3))));
@@ -1123,81 +1146,80 @@ class MessageSerializationTest {
 
     @Test
     void deserializeGPGJsonStatsNotAStringAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "JsonStats", "target": "game", "args": [5]}
-                                               """), is(new GPGMessage.Invalid("JsonStats", List.of(5))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "JsonStats", "target": "game", "args": [5]}
+                                        """), is(new GPGMessage.Invalid("JsonStats", List.of(5))));
     }
 
     @Test
     void deserializeGPGEnforceRating() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "EnforceRating", "target": "game", "args": []}
-                                               """), is(new GPGMessage.EnforceRating()));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "EnforceRating", "target": "game", "args": []}
+                                        """), is(new GPGMessage.EnforceRating()));
     }
 
     @Test
     void deserializeGPGGameEnded() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameEnded", "target": "game", "args": []}
-                                               """), is(new GPGMessage.GameEnded()));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameEnded", "target": "game", "args": []}
+                                        """), is(new GPGMessage.GameEnded()));
     }
 
     @Test
     void deserializeGPGTeamkillHappened() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "TeamkillHappened", "target": "game", "args": [412, "123456", "Victim", "654321", "Killer"]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "TeamkillHappened", "target": "game", "args": [412, "123456", "Victim", "654321", "Killer"]}
+                                        """),
                    is(new GPGMessage.TeamkillHappened(412, "123456", "Victim", "654321", "Killer")));
     }
 
     @Test
     void deserializeGPGTeamkillHappenedWithIntZeroIdForAi() {
         // An id is the int 0 (not text) when the army has no client
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "TeamkillHappened", "target": "game", "args": [412, 0, "-", "654321", "Killer"]}
-                                               """),
-                   is(new GPGMessage.TeamkillHappened(412, "0", "-", "654321", "Killer")));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "TeamkillHappened", "target": "game", "args": [412, 0, "-", "654321", "Killer"]}
+                                        """), is(new GPGMessage.TeamkillHappened(412, "0", "-", "654321", "Killer")));
     }
 
     @Test
     void deserializeGPGTeamkillReport() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "TeamkillReport", "target": "game", "args": [412, "123456", "Victim", "654321", "Killer"]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "TeamkillReport", "target": "game", "args": [412, "123456", "Victim", "654321", "Killer"]}
+                                        """),
                    is(new GPGMessage.TeamkillReport(412, "123456", "Victim", "654321", "Killer")));
     }
 
     @Test
     void deserializeGPGOperationComplete() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "OperationComplete", "target": "game", "args": [1, 0, "00:42:17"]}
-                                               """), is(new GPGMessage.OperationComplete(true, false, "00:42:17")));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "OperationComplete", "target": "game", "args": [1, 0, "00:42:17"]}
+                                        """), is(new GPGMessage.OperationComplete(true, false, "00:42:17")));
     }
 
     @Test
     void deserializeGPGRehost() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Rehost", "target": "game", "args": []}
-                                               """), is(new GPGMessage.Rehost()));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Rehost", "target": "game", "args": []}
+                                        """), is(new GPGMessage.Rehost()));
     }
 
     @Test
     void deserializeGPGBeat() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "BEAT", "target": "game", "args": [6000, 0]}
-                                               """), is(new GPGMessage.Beat(6000, 0)));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "BEAT", "target": "game", "args": [6000, 0]}
+                                        """), is(new GPGMessage.Beat(6000, 0)));
     }
 
     @Test
     void deserializeGPGBottleneckDocExample() {
-        GPGMessage.Client message = deserializeGPGClientContent("""
-                                                                {"command": "Bottleneck", "target": "game", "args": ["data", "19508", "517268,516974,344419", "5980.1"]}
-                                                                """);
+        GPGMessage.Client message = deserializeGPGClient("""
+                                                         {"command": "Bottleneck", "target": "game", "args": ["data", "19508", "517268,516974,344419", "5980.1"]}
+                                                         """);
 
         assertThat(message, is(new GPGMessage.Bottleneck(GPGMessage.Bottleneck.Kind.Known.DATA, 19508,
                                                          List.of(517268, 516974, 344419), 5980.1)));
@@ -1211,18 +1233,18 @@ class MessageSerializationTest {
                                                                   GPGMessage.Bottleneck.Kind.Known.DATA, "ack",
                                                                   GPGMessage.Bottleneck.Kind.Known.ACK);
 
-        expected.forEach((wireValue, kind) -> assertThat(deserializeGPGClientContent("""
-                                                                                     {"command": "Bottleneck", "target": "game", "args": ["%s", "1", "2", "3.0"]}
-                                                                                     """.formatted(wireValue)),
+        expected.forEach((wireValue, kind) -> assertThat(deserializeGPGClient("""
+                                                                              {"command": "Bottleneck", "target": "game", "args": ["%s", "1", "2", "3.0"]}
+                                                                              """.formatted(wireValue)),
                                                          is(new GPGMessage.Bottleneck(kind, 1, List.of(2), 3.0))));
     }
 
     @Test
     void deserializeGPGBottleneckUnknownKindAndNoIds() {
         // "unknown" is a documented kind with no Known constant; the id list may be empty
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Bottleneck", "target": "game", "args": ["unknown", "19508", "", "0.0"]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Bottleneck", "target": "game", "args": ["unknown", "19508", "", "0.0"]}
+                                        """),
                    is(new GPGMessage.Bottleneck(new GPGMessage.Bottleneck.Kind.Unknown("unknown"), 19508, List.of(),
                                                 0.0)));
     }
@@ -1230,36 +1252,35 @@ class MessageSerializationTest {
     @Test
     void deserializeGPGBottleneckCleared() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "BottleneckCleared", "target": "game", "args": []}
-                                               """), is(new GPGMessage.BottleneckCleared()));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "BottleneckCleared", "target": "game", "args": []}
+                                        """), is(new GPGMessage.BottleneckCleared()));
     }
 
     @Test
     void deserializeGPGDesync() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Desync", "target": "game", "args": [1234, 1, "9e107d9d372bb6826bd81d3542a419d6", "e4d909c290d0fb1ca068ffaddf22cbd0"]}
-                                               """),
-                   is(new GPGMessage.Desync(1234, 1, "9e107d9d372bb6826bd81d3542a419d6",
-                                            "e4d909c290d0fb1ca068ffaddf22cbd0")));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Desync", "target": "game", "args": [1234, 1, "9e107d9d372bb6826bd81d3542a419d6", "e4d909c290d0fb1ca068ffaddf22cbd0"]}
+                                        """), is(new GPGMessage.Desync(1234, 1, "9e107d9d372bb6826bd81d3542a419d6",
+                                                                       "e4d909c290d0fb1ca068ffaddf22cbd0")));
     }
 
     @Test
     void deserializeGPGStats() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Stats", "target": "game", "args": ["<?xml version=\\"1.0\\"?><GameStats></GameStats>"]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Stats", "target": "game", "args": ["<?xml version=\\"1.0\\"?><GameStats></GameStats>"]}
+                                        """),
                    is(new GPGMessage.XMLStats("<?xml version=\"1.0\"?><GameStats></GameStats>")));
     }
 
     @Test
     void deserializeGPGProcessNatPacket() {
         // Data arguments (wire tag 2) are base64 in JSON
-        GPGMessage.Client message = deserializeGPGClientContent("""
-                                                                {"command": "ProcessNatPacket", "target": "game", "args": ["192.168.0.1:6112", "AQID"]}
-                                                                """);
+        GPGMessage.Client message = deserializeGPGClient("""
+                                                         {"command": "ProcessNatPacket", "target": "game", "args": ["192.168.0.1:6112", "AQID"]}
+                                                         """);
 
         assertThat(message, instanceOf(GPGMessage.ProcessNatPacket.class));
         GPGMessage.ProcessNatPacket packet = (GPGMessage.ProcessNatPacket) message;
@@ -1270,17 +1291,17 @@ class MessageSerializationTest {
     @Test
     void deserializeGPGUnrecognizedCommandAsUnknown() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "RejoinOffer", "target": "game", "args": ["123456", 7]}
-                                               """), is(new GPGMessage.Unknown("RejoinOffer", List.of("123456", 7))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "RejoinOffer", "target": "game", "args": ["123456", 7]}
+                                        """), is(new GPGMessage.Unknown("RejoinOffer", List.of("123456", 7))));
     }
 
     @Test
     void deserializeGPGMessageWithoutTarget() {
         // target is optional in the Envelope schema
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Chat", "args": ["gl hf"]}
-                                               """), is(new GPGMessage.Chat("gl hf")));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Chat", "args": ["gl hf"]}
+                                        """), is(new GPGMessage.Chat("gl hf")));
     }
 
     // ---- GPG Unknown: commands with no registered subtype ----
@@ -1288,17 +1309,17 @@ class MessageSerializationTest {
     @Test
     void deserializeGPGUnrecognizedCommandWithoutArgsAsUnknown() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "SomethingNew", "target": "game", "args": []}
-                                               """), is(new GPGMessage.Unknown("SomethingNew", List.of())));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "SomethingNew", "target": "game", "args": []}
+                                        """), is(new GPGMessage.Unknown("SomethingNew", List.of())));
     }
 
     @Test
     void deserializeGPGToGameCommandSentByClientAsUnknown() {
         // Messages to the game (doc section 5) are not valid client messages
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "CreateLobby", "target": "game", "args": [0, 6112, "Player1", 123456, 1]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "CreateLobby", "target": "game", "args": [0, 6112, "Player1", 123456, 1]}
+                                        """),
                    is(new GPGMessage.Unknown("CreateLobby", List.of(0, 6112, "Player1", 123456, 1))));
     }
 
@@ -1307,94 +1328,159 @@ class MessageSerializationTest {
     @Test
     void deserializeGPGNonNumericStringForIntArgAsInvalid() {
 
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Bottleneck", "target": "game", "args": ["nothing", "a", "5,6,7", "6000.1"]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Bottleneck", "target": "game", "args": ["nothing", "a", "5,6,7", "6000.1"]}
+                                        """),
                    is(new GPGMessage.Invalid("Bottleneck", List.of("nothing", "a", "5,6,7", "6000.1"))));
     }
 
     @Test
     void deserializeGPGNonNumericIdListAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Bottleneck", "target": "game", "args": ["data", "1", "5,x", "1.0"]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Bottleneck", "target": "game", "args": ["data", "1", "5,x", "1.0"]}
+                                        """),
                    is(new GPGMessage.Invalid("Bottleneck", List.of("data", "1", "5,x", "1.0"))));
     }
 
     @Test
     void deserializeGPGStringForIntArgAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "ClearSlot", "target": "game", "args": ["three"]}
-                                               """), is(new GPGMessage.Invalid("ClearSlot", List.of("three"))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "ClearSlot", "target": "game", "args": ["three"]}
+                                        """), is(new GPGMessage.Invalid("ClearSlot", List.of("three"))));
     }
 
     @Test
     void deserializeGPGNonNumericPlayerOptionOwnerIdAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "PlayerOption", "target": "game", "args": ["not-a-uid", "Faction", 2]}
-                                               """),
+        assertThat(deserializeGPGClient("""
+                                        {"command": "PlayerOption", "target": "game", "args": ["not-a-uid", "Faction", 2]}
+                                        """),
                    is(new GPGMessage.Invalid("PlayerOption", List.of("not-a-uid", "Faction", 2))));
     }
 
     @Test
     void deserializeGPGDesyncWithStringBeatAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Desync", "target": "game", "args": ["beat", 1, "aa", "bb"]}
-                                               """),
-                   is(new GPGMessage.Invalid("Desync", List.of("beat", 1, "aa", "bb"))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Desync", "target": "game", "args": ["beat", 1, "aa", "bb"]}
+                                        """), is(new GPGMessage.Invalid("Desync", List.of("beat", 1, "aa", "bb"))));
     }
 
     @Test
     void deserializeGPGGameModsUnknownTypeAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameMods", "target": "game", "args": ["something", 1]}
-                                               """), is(new GPGMessage.Invalid("GameMods", List.of("something", 1))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameMods", "target": "game", "args": ["something", 1]}
+                                        """), is(new GPGMessage.Invalid("GameMods", List.of("something", 1))));
     }
 
     @Test
     void deserializeGPGGameModsMismatchedArgTypeAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameMods", "target": "game", "args": ["uids", 3]}
-                                               """), is(new GPGMessage.Invalid("GameMods", List.of("uids", 3))));
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameMods", "target": "game", "args": ["activated", "3"]}
-                                               """), is(new GPGMessage.Invalid("GameMods", List.of("activated", "3"))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameMods", "target": "game", "args": ["uids", 3]}
+                                        """), is(new GPGMessage.Invalid("GameMods", List.of("uids", 3))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameMods", "target": "game", "args": ["activated", "3"]}
+                                        """), is(new GPGMessage.Invalid("GameMods", List.of("activated", "3"))));
     }
 
     @Test
     void deserializeGPGTooFewArgsAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameResult", "target": "game", "args": [1]}
-                                               """), is(new GPGMessage.Invalid("GameResult", List.of(1))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameResult", "target": "game", "args": [1]}
+                                        """), is(new GPGMessage.Invalid("GameResult", List.of(1))));
     }
 
     @Test
     void deserializeGPGTooManyArgsAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "Chat", "target": "game", "args": ["gl hf", "extra"]}
-                                               """), is(new GPGMessage.Invalid("Chat", List.of("gl hf", "extra"))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "Chat", "target": "game", "args": ["gl hf", "extra"]}
+                                        """), is(new GPGMessage.Invalid("Chat", List.of("gl hf", "extra"))));
     }
 
     @Test
     void deserializeGPGGameModsTooManyArgsAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameMods", "target": "game", "args": ["activated", 1, 2]}
-                                               """),
-                   is(new GPGMessage.Invalid("GameMods", List.of("activated", 1, 2))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameMods", "target": "game", "args": ["activated", 1, 2]}
+                                        """), is(new GPGMessage.Invalid("GameMods", List.of("activated", 1, 2))));
     }
 
     @Test
     void deserializeGPGGameModsTooFewArgsAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameMods", "target": "game", "args": ["activated"]}
-                                               """), is(new GPGMessage.Invalid("GameMods", List.of("activated"))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameMods", "target": "game", "args": ["activated"]}
+                                        """), is(new GPGMessage.Invalid("GameMods", List.of("activated"))));
     }
 
     @Test
     void deserializeGPGArgsForNoArgCommandAsInvalid() {
-        assertThat(deserializeGPGClientContent("""
-                                               {"command": "GameEnded", "target": "game", "args": [1]}
-                                               """), is(new GPGMessage.Invalid("GameEnded", List.of(1))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameEnded", "target": "game", "args": [1]}
+                                        """), is(new GPGMessage.Invalid("GameEnded", List.of(1))));
+    }
+
+    // ---- GPG Server messages ----
+
+    @Test
+    void serializeHostGame() throws JSONException {
+        String json = serializeGPGServer(new GPGMessage.HostGame("test"));
+
+        JSONAssert.assertEquals("""
+                                {"command":"HostGame", "target":"game", "args": ["test"]}
+                                """, json, JSONCompareMode.STRICT);
+    }
+
+    @Test
+    void serializeHostGameWithMapFolderName() throws JSONException {
+        // The lobby server sends the map's folder name; the game builds /maps/<name>/<name>_scenario.lua from it
+        JSONAssert.assertEquals("""
+                                {"command": "HostGame", "target": "game", "args": ["scmp_009"]}
+                                """, serializeGPGServer(new GPGMessage.HostGame("scmp_009")), JSONCompareMode.STRICT);
+    }
+
+    @Test
+    void serializeJoinGame() throws JSONException {
+        // [hostName, hostUid]; the ICE adapter puts its local endpoint for the host in front before the game sees it
+        JSONAssert.assertEquals("""
+                                {"command": "JoinGame", "target": "game", "args": ["HostPlayer", 654321]}
+                                """, serializeGPGServer(new GPGMessage.JoinGame("HostPlayer", 654321)),
+                                JSONCompareMode.STRICT);
+    }
+
+    @Test
+    void serializeConnectToPeer() throws JSONException {
+        // [name, uid, offer]; the ICE adapter keeps offer and sends the game [endpoint, name, uid]
+        JSONAssert.assertEquals("""
+                                {"command": "ConnectToPeer", "target": "game", "args": ["OtherPlayer", 111111, true]}
+                                """, serializeGPGServer(new GPGMessage.ConnectToPeer("OtherPlayer", 111111, true)),
+                                JSONCompareMode.STRICT);
+        JSONAssert.assertEquals("""
+                                {"command": "ConnectToPeer", "target": "game", "args": ["OtherPlayer", 111111, false]}
+                                """, serializeGPGServer(new GPGMessage.ConnectToPeer("OtherPlayer", 111111, false)),
+                                JSONCompareMode.STRICT);
+    }
+
+    @Test
+    void serializeDisconnectFromPeer() throws JSONException {
+        JSONAssert.assertEquals("""
+                                {"command": "DisconnectFromPeer", "target": "game", "args": [111111]}
+                                """, serializeGPGServer(new GPGMessage.DisconnectFromPeer(111111)),
+                                JSONCompareMode.STRICT);
+    }
+
+    @Test
+    void serializeIceMsg() throws JSONException {
+        // Relayed to the receiver as IceMsg [sender id, msg]; msg stays the CandidatesMessage text, not an object
+        String json = serializeGPGServer(new GPGMessage.IceMsg(101, CANDIDATES_MESSAGE));
+
+        JSONAssert.assertEquals("""
+                                {"command": "IceMsg", "target": "game", "args": [101, %s]}
+                                """.formatted(jsonMapper.writeValueAsString(CANDIDATES_MESSAGE)), json,
+                                JSONCompareMode.STRICT);
+    }
+
+    @Test
+    void serverMessagesRoundTripThroughClientDeserializerWhereShared() {
+        // IceMsg is both a client and a server message with the same wire shape
+        GPGMessage.IceMsg iceMsg = new GPGMessage.IceMsg(101, CANDIDATES_MESSAGE);
+        assertThat(deserializeGPGClient(serializeGPGServer(iceMsg)), is(iceMsg));
     }
 
     // ---- Faction wire formats ----

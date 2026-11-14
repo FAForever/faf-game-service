@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import org.jspecify.annotations.Nullable;
 
+import java.nio.file.Path;
 import java.util.Locale;
 
 @JsonFormat(shape = JsonFormat.Shape.ARRAY)
@@ -13,19 +14,23 @@ public sealed interface GameOption extends GPGMessage.Client.HostOnly {
 
     @JsonCreator
     static GameOption of(KeyValue keyValue) {
+        final OptionValue value = keyValue.value();
         return switch (keyValue.key().toLowerCase(Locale.ROOT)) {
-            case "victory" -> Victory.of(keyValue.value().strValue());
-            case "unranked" -> Unranked.of(keyValue.value().strValue());
-            case "teamlock" -> TeamLock.of(keyValue.value().strValue());
-            case "gamespeed" -> GameSpeed.of(keyValue.value().strValue());
-            case "prebuiltunits" -> PrebuiltUnits.of(keyValue.value().strValue());
-            case "cheatsenabled" -> CheatsEnabled.of(keyValue.value().strValue());
-            case "fogofwar" -> FogOfWar.of(keyValue.value().strValue());
-            case "norushoption" -> NoRushOption.of(keyValue.value());
-            case "share" -> Share.of(keyValue.value().strValue());
-            default -> new Other(keyValue.key(), keyValue.value());
+            case "victory" -> Victory.of(value.strValue());
+            case "unranked" -> Unranked.of(value.strValue());
+            case "teamlock" -> TeamLock.of(value.strValue());
+            case "gamespeed" -> GameSpeed.of(value.strValue());
+            case "prebuiltunits" -> PrebuiltUnits.of(value.strValue());
+            case "cheatsenabled" -> CheatsEnabled.of(value.strValue());
+            case "fogofwar" -> FogOfWar.of(value.strValue());
+            case "norushoption" -> NoRushOption.of(value);
+            case "share" -> Share.of(value.strValue());
+            case "scenariofile" -> new ScenarioFile(Path.of(value.strValue()));
+            default -> new Other(keyValue.key(), value);
         };
     }
+
+    record ScenarioFile(Path value) implements GameOption {}
 
     record Victory(Value value) implements GameOption {
 

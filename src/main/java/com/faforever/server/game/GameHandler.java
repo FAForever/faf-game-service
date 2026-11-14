@@ -4,6 +4,7 @@ import com.faforever.server.interceptor.cdi.MDCInterceptor;
 import com.faforever.server.interceptor.cdi.MDCPopulated;
 import com.faforever.server.message.client.GPGMessage;
 import com.faforever.server.message.client.GameMessage;
+import com.faforever.server.message.client.GameOption;
 import com.faforever.server.message.client.dto.GameInfo;
 import com.faforever.server.message.client.dto.GameStatus;
 import com.faforever.server.message.client.dto.GameVisibility;
@@ -13,7 +14,7 @@ import com.faforever.server.message.service.InboundGPGMessage;
 import com.faforever.server.message.service.OutboundGPGMessage;
 import com.faforever.server.message.service.OutboundGameMessage;
 import com.faforever.server.player.Player;
-import com.faforever.server.rating.LeaderboardRating;
+import com.faforever.server.player.LeaderboardRating;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.Dependent;
@@ -87,14 +88,12 @@ class GameHandler {
     @MDCPopulated
     void accept(InboundGPGMessage<GPGMessage.Client> message) {
         gpgMessageExecutor.execute(() -> {
-            MDC.put(MDCInterceptor.COMMAND, message.message().content().command());
             MDC.put(MDCInterceptor.SESSION_ID, String.valueOf(message.sessionId()));
             MDC.put(MDCInterceptor.PLAYER_ID, String.valueOf(message.playerId()));
             MDC.put(MDCInterceptor.GAME_ID, String.valueOf(gameId));
             try {
                 handleGPGMessage(message);
             } finally {
-                MDC.remove(MDCInterceptor.COMMAND);
                 MDC.remove(MDCInterceptor.SESSION_ID);
                 MDC.remove(MDCInterceptor.PLAYER_ID);
                 MDC.remove(MDCInterceptor.GAME_ID);
@@ -163,12 +162,12 @@ class GameHandler {
             }
             case GPGMessage.PlayerOption playerOption when isHost -> {
                 int optionPlayerId = playerOption.playerId();
-                String key = playerOption.key();
-                Object value = playerOption.value();
+//                String key = playerOption.key();
+//                Object value = playerOption.value();
 
                 gameStateTracker.markDirty(this);
             }
-            case GPGMessage.GameOption gameOption when isHost -> {
+            case GameOption gameOption when isHost -> {
                 gameStateTracker.markDirty(this);
             }
             case GPGMessage.GameMods gameMods when isHost -> {
@@ -240,8 +239,8 @@ class GameHandler {
                 }
             }
             case GPGMessage.IceMsg iceMsg -> {
-                int receiverId = Integer.parseInt(iceMsg.args().getFirst().toString());
-                String iceMessage = iceMsg.args().get(1).toString();
+                int receiverId = iceMsg.receiverId();
+                String iceMessage = iceMsg.iceMessage();
                 LOG.debug("ICE message for player {}: {}", receiverId, iceMessage);
             }
             case GPGMessage.JsonStats jsonStats -> {

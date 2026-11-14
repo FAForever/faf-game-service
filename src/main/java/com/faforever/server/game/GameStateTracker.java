@@ -77,17 +77,13 @@ public class GameStateTracker {
             return;
         }
 
-        playerStateTracker.getPlayerIds().forEach(playerId -> {
-            Player player = playerStateTracker.getPlayer(playerId);
-            if (player == null) {
-                return;
-            }
-
+        playerStateTracker.getPlayers().forEach(player -> {
             GameMessage.GameInfoList filteredGameInfoMessage = createFilteredGameInfoMessage(frozenDirtyGames, player);
             if (filteredGameInfoMessage.games().isEmpty()) {
                 return;
             }
-            outboundEmitter.send(OutboundGameMessage.forPlayer(playerId, filteredGameInfoMessage));
+
+            outboundEmitter.send(OutboundGameMessage.forPlayer(player.getId(), filteredGameInfoMessage));
         });
 
         frozenDirtyGames.forEach(dirtyGames::remove);
@@ -138,8 +134,8 @@ public class GameStateTracker {
         GameHandler gameHandler = gameIdMap.get(gameId);
         if (gameHandler == null) {
             outboundEmitter.send(OutboundGameMessage.forSession(sessionId,
-                                                              new GameMessage.GameJoinFailed("host_left_game",
-                                                                                             gameId)));
+                                                                new GameMessage.GameJoinFailed("host_left_game",
+                                                                                               gameId)));
             return;
         }
 

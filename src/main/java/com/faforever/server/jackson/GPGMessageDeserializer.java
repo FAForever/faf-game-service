@@ -19,7 +19,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 
 @Slf4j
-public class GPGClientMessageDeserializer extends ValueDeserializer<GPGMessage.Client> {
+public class GPGMessageDeserializer extends ValueDeserializer<GPGMessage.Client> {
 
     /**
      * GPGNet args are positional, so a message must have exactly as many args as its type has components. Jackson
@@ -34,14 +34,14 @@ public class GPGClientMessageDeserializer extends ValueDeserializer<GPGMessage.C
     private static final ClassValue<Integer> ARG_COUNTS = new ClassValue<>() {
         @Override
         protected Integer computeValue(Class<?> type) {
-            if (type.isRecord()) {
-                return type.getRecordComponents().length;
-            }
             for (Method method : type.getDeclaredMethods()) {
                 if (Modifier.isStatic(method.getModifiers()) && method.isAnnotationPresent(JsonCreator.class)
                     && method.getParameterCount() == 1 && method.getParameterTypes()[0].isRecord()) {
                     return method.getParameterTypes()[0].getRecordComponents().length;
                 }
+            }
+            if (type.isRecord()) {
+                return type.getRecordComponents().length;
             }
             return -1;
         }
@@ -63,7 +63,7 @@ public class GPGClientMessageDeserializer extends ValueDeserializer<GPGMessage.C
         try {
             type = typeDeserializer.getTypeIdResolver().typeFromId(ctxt, command);
         } catch (InvalidTypeIdException e) {
-            return ctxt.readTreeAsValue(rootNode, GPGMessage.Unknown.class);
+            return ctxt.readTreeAsValue(rootNode, GPGMessage.Invalid.class);
         }
         // typeFromId returns null rather than throwing for an id with no registered subtype
         if (type == null) {

@@ -2,13 +2,17 @@ package com.faforever.server.message.client;
 
 import com.faforever.server.jackson.CommaSeparatedIntDeserializer;
 import com.faforever.server.jackson.EmbeddedJsonDeserializer;
-import com.faforever.server.jackson.GPGClientMessageDeserializer;
+import com.faforever.server.jackson.GPGMessageDeserializer;
 import com.faforever.server.message.client.dto.JsonStatsPayload;
+import com.faforever.server.message.client.dto.KeyValue;
+import com.faforever.server.message.client.dto.OptionValue;
+import com.faforever.server.message.client.dto.SlotOption;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.annotation.JsonTypeName;
 import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.Collection;
@@ -17,82 +21,77 @@ import java.util.List;
 public sealed interface GPGMessage {
 
     record Wrapped<T extends GPGMessage>(
-            @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "command", include = JsonTypeInfo.As.EXTERNAL_PROPERTY)
+            @JsonTypeInfo(use = JsonTypeInfo.Id.SIMPLE_NAME, property = "command",
+                          include = JsonTypeInfo.As.EXTERNAL_PROPERTY)
             @JsonProperty("args")
-            @JsonDeserialize(using = GPGClientMessageDeserializer.class)
+            @JsonDeserialize(using = GPGMessageDeserializer.class)
             T content
     ) {}
 
-    @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "command")
-    @JsonSubTypes({@JsonSubTypes.Type(value = HostGame.class, name = HostGame.COMMAND),
+    @JsonTypeInfo(use = JsonTypeInfo.Id.SIMPLE_NAME, property = "command")
+    @JsonSubTypes({@JsonSubTypes.Type(value = HostGame.class),
 
     })
     sealed interface Server extends GPGMessage {}
 
-    @JsonSubTypes({
-            @JsonSubTypes.Type(value = AIOption.class, name = AIOption.COMMAND),
-            @JsonSubTypes.Type(value = Bottleneck.class, name = Bottleneck.COMMAND),
-            @JsonSubTypes.Type(value = BottleneckCleared.class, name = BottleneckCleared.COMMAND),
-            @JsonSubTypes.Type(value = Chat.class, name = Chat.COMMAND),
-            @JsonSubTypes.Type(value = ClearSlot.class, name = ClearSlot.COMMAND),
-            @JsonSubTypes.Type(value = Desync.class, name = Desync.COMMAND),
-            @JsonSubTypes.Type(value = Disconnected.class, name = Disconnected.COMMAND),
-            @JsonSubTypes.Type(value = EstablishedPeer.class, name = EstablishedPeer.COMMAND),
-            @JsonSubTypes.Type(value = DisconnectedPeer.class, name = DisconnectedPeer.COMMAND),
-            @JsonSubTypes.Type(value = EnforceRating.class, name = EnforceRating.COMMAND),
-            @JsonSubTypes.Type(value = GameEnded.class, name = GameEnded.COMMAND),
-            @JsonSubTypes.Type(value = GameFull.class, name = GameFull.COMMAND),
-            @JsonSubTypes.Type(value = GameMods.class, name = GameMods.COMMAND),
-            @JsonSubTypes.Type(value = GameOption.class, name = GameOption.COMMAND),
-            @JsonSubTypes.Type(value = GameResult.class, name = GameResult.COMMAND),
-            @JsonSubTypes.Type(value = GameState.class, name = GameState.COMMAND),
-            @JsonSubTypes.Type(value = IceMsg.class, name = IceMsg.COMMAND),
-            @JsonSubTypes.Type(value = JsonStats.class, name = JsonStats.COMMAND),
-            @JsonSubTypes.Type(value = XMLStats.class, name = XMLStats.COMMAND),
-            @JsonSubTypes.Type(value = ProcessNatPacket.class, name = ProcessNatPacket.COMMAND),
-            @JsonSubTypes.Type(value = LaunchStatus.class, name = LaunchStatus.COMMAND),
-            @JsonSubTypes.Type(value = OperationComplete.class, name = OperationComplete.COMMAND),
-            @JsonSubTypes.Type(value = PlayerOption.class, name = PlayerOption.COMMAND),
-            @JsonSubTypes.Type(value = Rehost.class, name = Rehost.COMMAND),
-            @JsonSubTypes.Type(value = Beat.class, name = Beat.COMMAND),
-            @JsonSubTypes.Type(value = TeamkillHappened.class, name = TeamkillHappened.COMMAND),
-            @JsonSubTypes.Type(value = TeamkillReport.class, name = TeamkillReport.COMMAND),
-    })
+    @JsonSubTypes({@JsonSubTypes.Type(value = AIOption.class), @JsonSubTypes.Type(value = Bottleneck.class),
+                   @JsonSubTypes.Type(value = BottleneckCleared.class), @JsonSubTypes.Type(value = Chat.class),
+                   @JsonSubTypes.Type(value = ClearSlot.class), @JsonSubTypes.Type(value = Desync.class),
+                   @JsonSubTypes.Type(value = Disconnected.class), @JsonSubTypes.Type(value = EstablishedPeer.class),
+                   @JsonSubTypes.Type(value = DisconnectedPeer.class), @JsonSubTypes.Type(value = EnforceRating.class),
+                   @JsonSubTypes.Type(value = GameEnded.class), @JsonSubTypes.Type(value = GameFull.class),
+                   @JsonSubTypes.Type(value = GameMods.class), @JsonSubTypes.Type(value = GameOption.class),
+                   @JsonSubTypes.Type(value = GameResult.class), @JsonSubTypes.Type(value = GameState.class),
+                   @JsonSubTypes.Type(value = IceMsg.class), @JsonSubTypes.Type(value = JsonStats.class),
+                   @JsonSubTypes.Type(value = XMLStats.class), @JsonSubTypes.Type(value = ProcessNatPacket.class),
+                   @JsonSubTypes.Type(value = LaunchStatus.class), @JsonSubTypes.Type(value = OperationComplete.class),
+                   @JsonSubTypes.Type(value = PlayerOption.class), @JsonSubTypes.Type(value = Rehost.class),
+                   @JsonSubTypes.Type(value = Beat.class), @JsonSubTypes.Type(value = TeamkillHappened.class),
+                   @JsonSubTypes.Type(value = TeamkillReport.class),})
     sealed interface Client extends GPGMessage {
 
-        String command();
-
-        sealed interface HostOnly extends GPGMessage.Client {}
+        sealed interface HostOnly extends GPGMessage.Client
+                permits AIOption, ClearSlot, GameMods, PlayerOption, GameOption {}
 
     }
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record AIOption(
             String aiName,
-            String key,
-            OptionValue value
+            SlotOption option
     ) implements Client.HostOnly {
 
-        public static final String COMMAND = "AIOption";
-
-        public String command() {
-            return COMMAND;
+        @JsonCreator
+        public static AIOption of(Args args) {
+            return new AIOption(args.aiName(), SlotOption.of(args.key(), args.value()));
         }
+
+        @JsonFormat(shape = JsonFormat.Shape.ARRAY)
+        public record Args(String aiName, String key, OptionValue value) {}
+    }
+
+    record PlayerOption(
+            int playerId,
+            SlotOption option
+    ) implements Client.HostOnly {
+
+        @JsonCreator
+        public static PlayerOption of(Args args) {
+            return new PlayerOption(args.playerId(), SlotOption.of(args.key(), args.value()));
+        }
+
+        @JsonFormat(shape = JsonFormat.Shape.ARRAY)
+        public record Args(int playerId, String key, OptionValue value) {}
     }
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record Bottleneck(
             Kind kind,
             long beatNumber,
-            @JsonDeserialize(using = CommaSeparatedIntDeserializer.class) Collection<Integer> ids,
+            @JsonDeserialize(using = CommaSeparatedIntDeserializer.class)
+            Collection<Integer> ids,
             double milliseconds
     ) implements Client {
-        public static final String COMMAND = "Bottleneck";
-
-        public String command() {
-            return COMMAND;
-        }
-
         public sealed interface Kind {
 
             enum Known implements Kind {
@@ -116,35 +115,17 @@ public sealed interface GPGMessage {
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record BottleneckCleared(
-    ) implements Client {
-        public static final String COMMAND = "BottleneckCleared";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record Chat(
             String message
-    ) implements Client {
-        public static final String COMMAND = "Chat";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record ClearSlot(
             int slot
-    ) implements Client.HostOnly {
-        public static final String COMMAND = "ClearSlot";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client.HostOnly {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record Desync(
@@ -152,86 +133,40 @@ public sealed interface GPGMessage {
             int army,
             String hash1,
             String hash2
-    ) implements Client {
-        public static final String COMMAND = "Desync";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record Disconnected(
             String uid
-    ) implements Client {
-        public static final String COMMAND = "Disconnected";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record EstablishedPeer(
             String uid
-    ) implements Client {
-        public static final String COMMAND = "EstablishedPeer";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record DisconnectedPeer(
             String uid
-    ) implements Client {
-        public static final String COMMAND = "DisconnectedPeer";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
-    record EnforceRating() implements Client {
-        public static final String COMMAND = "EnforceRating";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    record EnforceRating() implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
-    record GameEnded() implements Client {
-        public static final String COMMAND = "GameEnded";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    record GameEnded() implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
-    record GameFull() implements Client {
-        public static final String COMMAND = "GameFull";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    record GameFull() implements Client {}
 
     sealed interface GameMods extends Client.HostOnly {
-        String COMMAND = "GameMods";
-
-        default String command() {
-            return COMMAND;
-        }
-
         @JsonCreator
-        static GameMods from(TypeArg typeArg) {
-            return switch (typeArg.arg()) {
-                case String uids when "uids".equalsIgnoreCase(typeArg.type()) -> new Uids(List.of(uids.split(" ")));
-                case Integer count when "activated".equalsIgnoreCase(typeArg.type()) -> new Activated(count);
+        static GameMods from(KeyValue keyValue) {
+            final String key = keyValue.key();
+            return switch (keyValue.value()) {
+                case OptionValue.Str(String strValue) when key.equalsIgnoreCase("uids") ->
+                        new Uids(List.of(strValue.split(" ")));
+                case OptionValue.Int(int intValue) when key.equalsIgnoreCase("activated") -> new Activated(intValue);
                 default -> throw new IllegalArgumentException("Unknown GameMods type");
             };
         }
@@ -240,47 +175,18 @@ public sealed interface GPGMessage {
 
         record Uids(Collection<String> uids) implements GameMods {}
 
-        @JsonFormat(shape = JsonFormat.Shape.ARRAY)
-        record TypeArg(
-                String type,
-                Object arg
-        ) {}
-    }
-
-    @JsonFormat(shape = JsonFormat.Shape.ARRAY)
-    record GameOption(
-            String key,
-            OptionValue value
-    ) implements Client.HostOnly {
-        public static final String COMMAND = "GameOption";
-
-        public String command() {
-            return COMMAND;
-        }
     }
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record GameResult(
             int army,
             String result
-    ) implements Client {
-        public static final String COMMAND = "GameResult";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record GameState(
             State state
     ) implements Client {
-        public static final String COMMAND = "GameState";
-
-        public String command() {
-            return COMMAND;
-        }
-
         public sealed interface State {
             enum Known implements State {
                 IDLE, LOBBY, LAUNCHING
@@ -302,66 +208,36 @@ public sealed interface GPGMessage {
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record IceMsg(
-            List<Object> args
-    ) implements Client {
-        public static final String COMMAND = "IceMsg";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+            int receiverId,
+            String iceMessage
+    ) implements Client {}
 
     /**
      * End-of-game army statistics, sent once by every client that is not watching a replay. The single arg is a JSON
      * document: lua/sim/score.lua's ArmyScore table at game over, encoded by lua/system/dkson.lua.
-     *
-     * @see <a href="https://github.com/Draiget/faf-re/blob/master/docs/GPGNET_MESSAGES.md#4-jsonstats-payload">
-     *         faf-re GPGNET_MESSAGES.md, JsonStats payload</a>
      */
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record JsonStats(
-            @JsonDeserialize(using = EmbeddedJsonDeserializer.class) JsonStatsPayload payload
-    ) implements Client {
-        public static final String COMMAND = "JsonStats";
+            @JsonDeserialize(using = EmbeddedJsonDeserializer.class)
+            JsonStatsPayload payload
+    ) implements Client {}
 
-        public String command() {
-            return COMMAND;
-        }
-    }
-
+    @JsonTypeName("Stats")
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record XMLStats(
             String xml
-    ) implements Client {
-        public static final String COMMAND = "Stats";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record ProcessNatPacket(
             String fromIpPort,
             byte[] data
-    ) implements Client {
-        public static final String COMMAND = "ProcessNatPacket";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record LaunchStatus(
             Status status
     ) implements Client {
-        public static final String COMMAND = "LaunchStatus";
-
-        public String command() {
-            return COMMAND;
-        }
-
         public sealed interface Status {
             enum Known implements LaunchStatus.Status {
                 CONNECTING, MISSING_LOCAL_PEERS, REJOINING, READY, EJECTED, REJECTED
@@ -386,48 +262,17 @@ public sealed interface GPGMessage {
             boolean primary,
             boolean secondary,
             String time
-    ) implements Client {
-        public static final String COMMAND = "OperationComplete";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
-
-    @JsonFormat(shape = JsonFormat.Shape.ARRAY)
-    record PlayerOption(
-            int playerId,
-            String key,
-            OptionValue value
-    ) implements Client.HostOnly {
-        public static final String COMMAND = "PlayerOption";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record Rehost(
-    ) implements Client {
-        public static final String COMMAND = "Rehost";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record Beat(
             int tick,
             int gameSpeed
-    ) implements Client {
-        public static final String COMMAND = "BEAT";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record TeamkillHappened(
@@ -436,13 +281,7 @@ public sealed interface GPGMessage {
             String victimName,
             String killerId,
             String killerName
-    ) implements Client {
-        public static final String COMMAND = "TeamkillHappened";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record TeamkillReport(
@@ -451,13 +290,7 @@ public sealed interface GPGMessage {
             String victimName,
             String killerId,
             String killerName
-    ) implements Client {
-        public static final String COMMAND = "TeamkillReport";
-
-        public String command() {
-            return COMMAND;
-        }
-    }
+    ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record Unknown(
@@ -474,26 +307,6 @@ public sealed interface GPGMessage {
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record HostGame(
             List<Object> args
-    ) implements Server {
+    ) implements Server {}
 
-        public static final String COMMAND = "HostGame";
-
-    }
-
-    sealed interface OptionValue {
-        record Str(String value) implements OptionValue {}
-
-        record Int(int value) implements OptionValue {}
-
-        record Unknown(Object value) implements OptionValue {}
-
-        @JsonCreator
-        static OptionValue fromValue(Object value) {
-            return switch (value) {
-                case String strValue -> new OptionValue.Str(strValue);
-                case Integer intValue -> new OptionValue.Int(intValue);
-                default -> new Unknown(value);
-            };
-        }
-    }
 }

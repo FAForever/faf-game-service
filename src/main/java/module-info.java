@@ -27,6 +27,7 @@ module com.faforever.server.player {
     requires micrometer.commons;
     requires io.smallrye.config;
     requires jakarta.data;
+    requires quarkus.jackson;
 
     requires static lombok;
 }

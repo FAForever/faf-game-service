@@ -28,7 +28,7 @@ public class EmbeddedJsonDeserializer extends ValueDeserializer<Object> {
     }
 
     @Override
-    public ValueDeserializer<?> createContextual(DeserializationContext ctxt, @Nullable BeanProperty property) {
+    public ValueDeserializer<?> createContextual(DeserializationContext context, @Nullable BeanProperty property) {
         if (property == null) {
             return this;
         }
@@ -36,22 +36,22 @@ public class EmbeddedJsonDeserializer extends ValueDeserializer<Object> {
     }
 
     @Override
-    public Object deserialize(JsonParser p, DeserializationContext ctxt) throws JacksonException {
+    public Object deserialize(JsonParser p, DeserializationContext context) throws JacksonException {
         if (type == null) {
-            return ctxt.reportBadDefinition(Object.class,
+            return context.reportBadDefinition(Object.class,
                                             "EmbeddedJsonDeserializer must be used on a property, to know its type");
         }
         if (!p.hasToken(JsonToken.VALUE_STRING)) {
-            return ctxt.handleUnexpectedToken(type, p);
+            return context.handleUnexpectedToken(type, p);
         }
 
         String json = p.getString();
-        try (JsonParser embedded = ctxt.createParser(json)) {
+        try (JsonParser embedded = context.createParser(json)) {
             embedded.nextToken();
-            return ctxt.readValue(embedded, type);
+            return context.readValue(embedded, type);
         } catch (StreamReadException e) {
             // Malformed JSON text is bad input, so report it as such rather than as a stream failure
-            throw ctxt.weirdStringException(json, type.getRawClass(), "not valid JSON: " + e.getOriginalMessage());
+            throw context.weirdStringException(json, type.getRawClass(), "not valid JSON: " + e.getOriginalMessage());
         }
     }
 }

@@ -7,8 +7,6 @@ quarkus:
     enabled: false
   application:
     name: faf-game-service
-  jackson:
-    property-naming-strategy: SNAKE_CASE
   datasource:
     db-kind: mariadb
     username: ${DATABASE_USERNAME:faf-game-service}

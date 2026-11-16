@@ -1,8 +1,5 @@
 package com.faforever.server.message.client.dto;
 
-import com.faforever.server.message.client.GameOption;
-import com.fasterxml.jackson.annotation.JsonCreator;
-
 import java.util.List;
 import java.util.Locale;
 

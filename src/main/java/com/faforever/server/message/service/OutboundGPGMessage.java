@@ -1,7 +1,6 @@
 package com.faforever.server.message.service;
 
 import com.faforever.server.message.client.GPGMessage;
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 public record OutboundGPGMessage<T extends GPGMessage.Server>(
         OutboundTarget target,

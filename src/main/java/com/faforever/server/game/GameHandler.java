@@ -23,7 +23,6 @@ import com.faforever.server.player.Player;
 import com.faforever.server.player.dto.LeaderboardRating;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.Dependent;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;

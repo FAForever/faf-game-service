@@ -6,10 +6,7 @@ import io.quarkus.cache.CacheResult;
 import jakarta.data.repository.Query;
 import jakarta.data.repository.Repository;
 import jakarta.transaction.Transactional;
-import org.jspecify.annotations.Nullable;
 
-import java.util.Collection;
-import java.util.List;
 import java.util.Optional;
 
 @Repository

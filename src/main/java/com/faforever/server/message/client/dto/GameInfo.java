@@ -21,7 +21,7 @@ public record GameInfo(
         String featuredMod,
         @JsonProperty("rating_type") String leaderboard,
         Map<String, String> simMods,
-        String mapName,
+        @JsonProperty("mapname") String mapName,
         String mapFilePath,
         @Nullable Instant hostedAt,
         @Nullable Long launchedAt,
@@ -29,8 +29,8 @@ public record GameInfo(
         @Nullable Integer ratingMin,
         @Nullable Integer ratingMax,
         boolean enforceRatingRange,
-        Map<Integer, Set<String>> teams,
-        Set<Team> teamIds
+        @JsonProperty("teams") Map<Integer, Set<String>> teamPlayers,
+        @JsonProperty("teams_ids") Set<Team> teams
 ) {
 
     // GameInfoList is technically recursive and the client expects the inner elements to have the command
@@ -42,6 +42,10 @@ public record GameInfo(
     public record Team(
             int teamId,
             Set<Integer> playerIds
-    ) {}
+    ) {
+        public Team {
+            playerIds = Set.copyOf(playerIds);
+        }
+    }
 
 }

@@ -5,11 +5,10 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 public record OutboundGPGMessage<T extends GPGMessage.Server>(
         OutboundTarget target,
-        @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "command")
-        T message
+        GPGMessage.Wrapped<T> message
 ) {
 
     public static <T extends GPGMessage.Server> OutboundGPGMessage<GPGMessage.Server> forSession(long sessionId, T message) {
-        return new OutboundGPGMessage<>(new OutboundTarget.Session(sessionId), message);
+        return new OutboundGPGMessage<>(new OutboundTarget.Session(sessionId), new GPGMessage.Wrapped<>(message));
     }
 }

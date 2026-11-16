@@ -33,6 +33,7 @@ dependencies {
     implementation("io.quarkus:quarkus-hibernate-orm")
     implementation("io.quarkus:quarkus-data-processor")
     implementation("io.quarkus:quarkus-arc")
+    implementation("io.quarkus:quarkus-cache")
     implementation("io.quarkus:quarkus-logging-json")
     implementation("io.quarkus:quarkus-micrometer-registry-prometheus")
     implementation("io.quarkus:quarkus-smallrye-health")

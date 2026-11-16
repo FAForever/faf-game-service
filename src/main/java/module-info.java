@@ -30,4 +30,5 @@ module com.faforever.server.player {
     requires quarkus.jackson;
 
     requires static lombok;
+    requires quarkus.cache;
 }

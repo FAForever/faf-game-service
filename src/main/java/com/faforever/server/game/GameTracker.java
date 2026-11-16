@@ -1,12 +1,16 @@
 package com.faforever.server.game;
 
+import com.faforever.server.game.dto.GameDetails;
+import com.faforever.server.game.dto.GamePlayer;
+import com.faforever.server.game.dto.LaunchDetails;
 import com.faforever.server.message.client.GPGMessage;
 import com.faforever.server.message.client.GameMessage;
 import com.faforever.server.message.client.dto.GameInfo;
 import com.faforever.server.message.service.InboundGPGMessage;
 import com.faforever.server.message.service.OutboundGameMessage;
 import com.faforever.server.player.Player;
-import com.faforever.server.player.PlayerStateTracker;
+import com.faforever.server.player.PlayerTracker;
+import io.quarkus.logging.Log;
 import io.quarkus.scheduler.Scheduled;
 import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.annotation.Nullable;
@@ -15,27 +19,29 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import lombok.AccessLevel;
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.eclipse.microprofile.reactive.messaging.Channel;
 import org.eclipse.microprofile.reactive.messaging.Emitter;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
 
-import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+@Slf4j
 @ApplicationScoped
 @RunOnVirtualThread
-public class GameStateTracker {
+public class GameTracker {
 
-    private final PlayerStateTracker playerStateTracker;
+    private final PlayerTracker playerTracker;
 
     private final Emitter<OutboundGameMessage<GameMessage.Server>> outboundEmitter;
 
-    private final GameRepository gameRepository;
+    private final GameTrackerRepository gameTrackerRepository;
 
     private final Instance<GameHandler> gameHandlerInstance;
 
@@ -43,20 +49,20 @@ public class GameStateTracker {
     private final Map<Integer, GameHandler> gameIdMap = new ConcurrentHashMap<>();
     private final AtomicInteger gameCounter = new AtomicInteger();
     @Getter(AccessLevel.PACKAGE)
-    private final Set<GameHandler> dirtyGames = ConcurrentHashMap.newKeySet();
+    private final Map<Integer, GameInfoWithFilter> dirtyGames = new ConcurrentHashMap<>();
 
-    GameStateTracker(PlayerStateTracker playerStateTracker,
-                     @Channel("lobby-outbound") Emitter<OutboundGameMessage<GameMessage.Server>> outboundEmitter,
-                     GameRepository gameRepository, Instance<GameHandler> gameHandlerInstance) {
-        this.playerStateTracker = playerStateTracker;
+    GameTracker(PlayerTracker playerTracker,
+                @Channel("lobby-outbound") Emitter<OutboundGameMessage<GameMessage.Server>> outboundEmitter,
+                GameTrackerRepository gameTrackerRepository, Instance<GameHandler> gameHandlerInstance) {
+        this.playerTracker = playerTracker;
         this.outboundEmitter = outboundEmitter;
-        this.gameRepository = gameRepository;
+        this.gameTrackerRepository = gameTrackerRepository;
         this.gameHandlerInstance = gameHandlerInstance;
     }
 
     @PostConstruct
     void initialize() {
-        gameCounter.set(gameRepository.findMaxGameId());
+        gameCounter.set(gameTrackerRepository.findMaxGameId());
     }
 
     @Incoming("gpg-inbound")
@@ -72,13 +78,17 @@ public class GameStateTracker {
     @Scheduled(every = "1s", skipExecutionIf = Scheduled.ApplicationNotRunning.class,
                concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void updateDirtyGames() {
-        Set<GameHandler> frozenDirtyGames = Set.copyOf(dirtyGames);
+        Map<Integer, GameInfoWithFilter> frozenDirtyGames = Map.copyOf(dirtyGames);
         if (frozenDirtyGames.isEmpty()) {
             return;
         }
 
-        playerStateTracker.getPlayers().forEach(player -> {
-            GameMessage.GameInfoList filteredGameInfoMessage = createFilteredGameInfoMessage(frozenDirtyGames, player);
+        playerTracker.getPlayers().forEach(player -> {
+            Set<GameInfo> visibleGames = frozenDirtyGames.values().stream()
+                                                         .filter(game -> game.filter().test(player))
+                                                         .map(GameInfoWithFilter::gameInfo)
+                                                         .collect(Collectors.toSet());
+            GameMessage.GameInfoList filteredGameInfoMessage = new GameMessage.GameInfoList(visibleGames);
             if (filteredGameInfoMessage.games().isEmpty()) {
                 return;
             }
@@ -89,31 +99,33 @@ public class GameStateTracker {
         frozenDirtyGames.forEach(dirtyGames::remove);
     }
 
-    public void sendGamesToPlayer(long sessionId, Player player) {
+    public void sendGamesToSession(long sessionId) {
+        Player player = playerTracker.getPlayerForSession(sessionId);
+        if (player == null) {
+            Log.warn("No player associated with session");
+            return;
+        }
         Set<GameHandler> gameHandlers = Set.copyOf(gameIdMap.values());
 
-        GameMessage.GameInfoList filteredGameInfoMessage = createFilteredGameInfoMessage(gameHandlers, player);
+        GameMessage.GameInfoList filteredGameInfoMessage = gameHandlers.stream()
+                                                                       .filter(gameHandler -> gameHandler.isVisibleToPlayer(
+                                                                               player))
+                                                                       .map(GameHandler::createGameInfo)
+                                                                       .filter(Objects::nonNull)
+                                                                       .collect(Collectors.collectingAndThen(
+                                                                               Collectors.toSet(),
+                                                                               GameMessage.GameInfoList::new));
         if (filteredGameInfoMessage.games().isEmpty()) {
             return;
         }
         outboundEmitter.send(OutboundGameMessage.forSession(sessionId, filteredGameInfoMessage));
     }
 
-    private GameMessage.GameInfoList createFilteredGameInfoMessage(Collection<GameHandler> gameHandlers,
-                                                                   Player player) {
-        Set<GameInfo> visibleGames = gameHandlers.stream()
-                                                 .filter(game -> game.isVisibleToPlayer(player))
-                                                 .map(GameHandler::createGameInfo)
-                                                 .filter(Objects::nonNull)
-                                                 .collect(Collectors.toSet());
-        return new GameMessage.GameInfoList(visibleGames);
-    }
-
     void hostGame(long sessionId, String title, String mapName, GameDetails gameDetails) {
         GameHandler gameHandler = gameHandlerInstance.get();
         sessionGameHandlerMap.put(sessionId, gameHandler);
         gameIdMap.put(gameHandler.getGameId(), gameHandler);
-        Player player = playerStateTracker.getPlayerForSession(sessionId);
+        Player player = playerTracker.getPlayerForSession(sessionId);
         if (player == null) {
             throw new IllegalStateException("Player not active");
         }
@@ -126,7 +138,7 @@ public class GameStateTracker {
     }
 
     void joinGame(long sessionId, int gameId, @Nullable String password) {
-        Player player = playerStateTracker.getPlayerForSession(sessionId);
+        Player player = playerTracker.getPlayerForSession(sessionId);
         if (player == null) {
             throw new IllegalStateException("Player not active");
         }
@@ -169,7 +181,21 @@ public class GameStateTracker {
         return gameCounter.incrementAndGet();
     }
 
-    void markDirty(GameHandler gameHandler) {
-        dirtyGames.add(gameHandler);
+    void stageUpdate(GameInfo gameInfo, Predicate<Player> filter) {
+        dirtyGames.put(gameInfo.uid(), new GameInfoWithFilter(gameInfo, filter));
     }
+
+    void removeGame(GameHandler gameHandler) {
+        if (!gameIdMap.remove(gameHandler.getGameId(), gameHandler)) {
+            LOG.warn("Game handler not associated with game id in game tracker");
+            return;
+        }
+
+        gameHandlerInstance.destroy(gameHandler);
+    }
+
+    private record GameInfoWithFilter(
+            GameInfo gameInfo,
+            Predicate<Player> filter
+    ) {}
 }

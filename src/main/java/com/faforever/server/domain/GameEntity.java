@@ -5,7 +5,9 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import lombok.AccessLevel;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.OffsetDateTime;
@@ -14,6 +16,7 @@ import java.time.OffsetDateTime;
 @Setter
 @Entity
 @Table(name = "game_stats")
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class GameEntity extends AbstractEntity {
 
     @Column(name = "gameName")

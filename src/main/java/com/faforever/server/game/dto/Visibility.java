@@ -1,4 +1,4 @@
-package com.faforever.server.game;
+package com.faforever.server.game.dto;
 
 import java.util.Collection;
 import java.util.Set;

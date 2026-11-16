@@ -4,8 +4,9 @@ import jakarta.data.repository.Query;
 import jakarta.data.repository.Repository;
 
 @Repository
-interface GameRepository {
+interface GameTrackerRepository {
 
     @Query("select max(g.id) from GameEntity g")
     int findMaxGameId();
+
 }

@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 @JsonFormat(shape = JsonFormat.Shape.ARRAY)
-public sealed interface GameOption extends GPGMessage.Client.HostOnly {
+public sealed interface GameOption extends GPGMessage.Client.GameSetup {
 
     @JsonCreator
     static GameOption of(KeyValue keyValue) {
@@ -25,7 +25,10 @@ public sealed interface GameOption extends GPGMessage.Client.HostOnly {
             case "fogofwar" -> FogOfWar.of(value.strValue());
             case "norushoption" -> NoRushOption.of(value);
             case "share" -> Share.of(value.strValue());
+            case "restrictedcategories" -> RestrictedCategories.of(value.strValue());
+            case "aireplacement" -> AIReplacement.of(value.strValue());
             case "scenariofile" -> new ScenarioFile(Path.of(value.strValue()));
+            case "slots" -> new Slots(value.intValue());
             default -> new Other(keyValue.key(), value);
         };
     }
@@ -34,9 +37,9 @@ public sealed interface GameOption extends GPGMessage.Client.HostOnly {
 
     record Victory(Value value) implements GameOption {
 
-        sealed interface Value {}
+        public sealed interface Value {}
 
-        enum Known implements Value {
+        public enum Known implements Value {
             DEMORALIZATION, DOMINATION, ERADICATION, SANDBOX
         }
 
@@ -47,37 +50,49 @@ public sealed interface GameOption extends GPGMessage.Client.HostOnly {
 
     record Unranked(Value value) implements GameOption {
 
-        sealed interface Value {}
-
-        enum Known implements Value {
-            TRUE, FALSE
-        }
+        public sealed interface Value {}
 
         static Unranked of(String value) {
             Boolean enabled = parseToggle(value);
-            return new Unranked(enabled == null ? new Unknown(value) : enabled ? Known.TRUE : Known.FALSE);
+            return new Unranked(enabled == null ? new Unknown(value) : enabled ? TrueFalse.TRUE : TrueFalse.FALSE);
+        }
+    }
+
+    record RestrictedCategories(Value value) implements GameOption {
+
+        public sealed interface Value {}
+
+        static RestrictedCategories of(String value) {
+            Boolean enabled = parseToggle(value);
+            return new RestrictedCategories(enabled == null ? new Unknown(value) : enabled ? TrueFalse.TRUE : TrueFalse.FALSE);
+        }
+    }
+
+    record AIReplacement(Value value) implements GameOption {
+
+        public sealed interface Value {}
+
+        static AIReplacement of(String value) {
+            Boolean enabled = parseToggle(value);
+            return new AIReplacement(enabled == null ? new Unknown(value) : enabled ? TrueFalse.TRUE : TrueFalse.FALSE);
         }
     }
 
     record CheatsEnabled(Value value) implements GameOption {
 
-        sealed interface Value {}
-
-        enum Known implements Value {
-            TRUE, FALSE
-        }
+        public sealed interface Value {}
 
         static CheatsEnabled of(String value) {
             Boolean enabled = parseToggle(value);
-            return new CheatsEnabled(enabled == null ? new Unknown(value) : enabled ? Known.TRUE : Known.FALSE);
+            return new CheatsEnabled(enabled == null ? new Unknown(value) : enabled ? TrueFalse.TRUE : TrueFalse.FALSE);
         }
     }
 
     record FogOfWar(Value value) implements GameOption {
 
-        sealed interface Value {}
+        public sealed interface Value {}
 
-        enum Known implements Value {
+        public enum Known implements Value {
             NONE, EXPLORED
         }
 
@@ -88,9 +103,9 @@ public sealed interface GameOption extends GPGMessage.Client.HostOnly {
 
     record TeamLock(Value value) implements GameOption {
 
-        sealed interface Value {}
+        public sealed interface Value {}
 
-        enum Known implements Value {
+        public enum Known implements Value {
             LOCKED, UNLOCKED
         }
 
@@ -101,9 +116,9 @@ public sealed interface GameOption extends GPGMessage.Client.HostOnly {
 
     record GameSpeed(Value value) implements GameOption {
 
-        sealed interface Value {}
+        public sealed interface Value {}
 
-        enum Known implements GameSpeed.Value {
+        public enum Known implements GameSpeed.Value {
             NORMAL, FAST, ADJUSTABLE
         }
 
@@ -114,14 +129,11 @@ public sealed interface GameOption extends GPGMessage.Client.HostOnly {
 
     record PrebuiltUnits(Value value) implements GameOption {
 
-        sealed interface Value {}
-
-        enum Known implements Value {
-            OFF, ON
-        }
+        public sealed interface Value {}
 
         static PrebuiltUnits of(String value) {
-            return new PrebuiltUnits(findValueOrUnknown(value, PrebuiltUnits.Known.class));
+            Boolean enabled = parseToggle(value);
+            return new PrebuiltUnits(enabled == null ? new Unknown(value) : enabled ? TrueFalse.TRUE : TrueFalse.FALSE);
         }
     }
 
@@ -139,11 +151,15 @@ public sealed interface GameOption extends GPGMessage.Client.HostOnly {
         }
     }
 
+    record Title(String value) implements GameOption {}
+
+    record Slots(int value) implements GameOption {}
+
     record Share(Value value) implements GameOption {
 
-        sealed interface Value {}
+        public sealed interface Value {}
 
-        enum Known implements Value {
+        public enum Known implements Value {
             FULL_SHARE, SHARE_UNTIL_DEATH, PARTIAL_SHARE, TRANSFER_TO_KILLER, DEFECTORS, CIVILIAN_DESERT
         }
 
@@ -160,9 +176,13 @@ public sealed interface GameOption extends GPGMessage.Client.HostOnly {
         }
     }
 
+    enum TrueFalse implements CheatsEnabled.Value, AIReplacement.Value, PrebuiltUnits.Value, RestrictedCategories.Value, Unranked.Value {
+        TRUE, FALSE
+    }
+
     record Unknown(String value)
             implements PrebuiltUnits.Value, GameSpeed.Value, TeamLock.Value, Victory.Value, Unranked.Value, Share.Value,
-            FogOfWar.Value, CheatsEnabled.Value {}
+            FogOfWar.Value, CheatsEnabled.Value, RestrictedCategories.Value, AIReplacement.Value {}
 
     record Other(
             String key,

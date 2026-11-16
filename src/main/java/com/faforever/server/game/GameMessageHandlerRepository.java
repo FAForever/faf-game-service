@@ -1,4 +1,4 @@
-package com.faforever.server.player;
+package com.faforever.server.game;
 
 import com.faforever.server.domain.FriendOrFoeEntity;
 import com.faforever.server.domain._FriendOrFoeEntity;
@@ -11,12 +11,11 @@ import jakarta.transaction.Transactional;
 import java.util.List;
 
 @Repository
-public interface FriendOrFoeRepository {
+@Transactional
+interface GameMessageHandlerRepository {
 
     @Find(FriendOrFoeEntity.class)
     @Select(_FriendOrFoeEntity.ID_SUBJECT_ID)
-    @Transactional
     List<Integer> loadFriendsAndFoes(@By(_FriendOrFoeEntity.ID_PLAYER_ID) int playerId, @By(_FriendOrFoeEntity.STATUS)
-                                               FriendOrFoeEntity.Status status);
-
+    FriendOrFoeEntity.Status status);
 }

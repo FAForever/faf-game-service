@@ -3,14 +3,15 @@ package com.faforever.server.message.client;
 import com.faforever.server.jackson.CommaSeparatedIntDeserializer;
 import com.faforever.server.jackson.EmbeddedJsonDeserializer;
 import com.faforever.server.jackson.GPGMessageDeserializer;
+import com.faforever.server.jackson.ResultDetailsDeserializer;
 import com.faforever.server.message.client.dto.JsonStatsPayload;
 import com.faforever.server.message.client.dto.KeyValue;
 import com.faforever.server.message.client.dto.OptionValue;
+import com.faforever.server.message.client.dto.ResultDetails;
 import com.faforever.server.message.client.dto.SlotOption;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.annotation.JsonTypeName;
@@ -18,6 +19,7 @@ import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 public sealed interface GPGMessage {
 
@@ -58,7 +60,7 @@ public sealed interface GPGMessage {
                    @JsonSubTypes.Type(value = TeamkillReport.class),})
     sealed interface Client extends GPGMessage {
 
-        sealed interface HostOnly extends GPGMessage.Client
+        sealed interface GameSetup extends GPGMessage.Client
                 permits AIOption, ClearSlot, GameMods, PlayerOption, GameOption {}
 
     }
@@ -67,7 +69,7 @@ public sealed interface GPGMessage {
     record AIOption(
             String aiName,
             SlotOption option
-    ) implements Client.HostOnly {
+    ) implements Client.GameSetup {
 
         @JsonCreator
         public static AIOption of(Args args) {
@@ -81,7 +83,7 @@ public sealed interface GPGMessage {
     record PlayerOption(
             int playerId,
             SlotOption option
-    ) implements Client.HostOnly {
+    ) implements Client.GameSetup {
 
         @JsonCreator
         public static PlayerOption of(Args args) {
@@ -133,7 +135,7 @@ public sealed interface GPGMessage {
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record ClearSlot(
             int slot
-    ) implements Client.HostOnly {}
+    ) implements Client.GameSetup {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record Desync(
@@ -167,13 +169,13 @@ public sealed interface GPGMessage {
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record GameFull() implements Client {}
 
-    sealed interface GameMods extends Client.HostOnly {
+    sealed interface GameMods extends Client.GameSetup {
         @JsonCreator
         static GameMods from(KeyValue keyValue) {
             final String key = keyValue.key();
             return switch (keyValue.value()) {
                 case OptionValue.Str(String strValue) when key.equalsIgnoreCase("uids") ->
-                        new Uids(List.of(strValue.split(" ")));
+                        new Uids(Set.of(strValue.split(" ")));
                 case OptionValue.Int(int intValue) when key.equalsIgnoreCase("activated") -> new Activated(intValue);
                 default -> throw new IllegalArgumentException("Unknown GameMods type");
             };
@@ -188,7 +190,8 @@ public sealed interface GPGMessage {
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
     record GameResult(
             int army,
-            String result
+            @JsonDeserialize(using = ResultDetailsDeserializer.class)
+            ResultDetails result
     ) implements Client {}
 
     @JsonFormat(shape = JsonFormat.Shape.ARRAY)
@@ -197,7 +200,7 @@ public sealed interface GPGMessage {
     ) implements Client {
         public sealed interface State {
             enum Known implements State {
-                IDLE, LOBBY, LAUNCHING
+                IDLE, LOBBY, LAUNCHING, ENDED
             }
 
             record Unknown(String value) implements State {}

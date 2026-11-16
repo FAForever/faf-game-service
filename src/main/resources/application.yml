@@ -17,6 +17,14 @@ quarkus:
     enabled: true
   http:
     host-enabled: false
+  cache:
+    caffeine:
+      metrics-enabled: true
+      expire-after-write: 1h
+      "mod-version":
+        maximum-size: 1024
+      "map-version":
+        maximum-size: 256
 
 rabbitmq-host: ${RABBITMQ_HOST:localhost}
 rabbitmq-port: ${RABBITMQ_PORT:5672}

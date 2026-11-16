@@ -10,6 +10,7 @@ import com.faforever.server.message.client.dto.GameVisibility;
 import com.faforever.server.message.client.dto.JsonStatsPayload;
 import com.faforever.server.message.client.dto.LobbyMode;
 import com.faforever.server.message.client.dto.OptionValue;
+import com.faforever.server.message.client.dto.ResultDetails;
 import com.faforever.server.message.client.dto.SlotOption;
 import io.quarkus.jackson.runtime.JsonMapperProducer;
 import io.quarkus.test.component.QuarkusComponentTest;
@@ -131,7 +132,7 @@ class MessageSerializationTest {
                                          GameStatus.OPEN, "faf", "global", Map.of("uid-1", "Some Mod"), "scmp_007",
                                          "maps/scmp_007.zip",
                                          OffsetDateTime.of(2026, 1, 2, 3, 4, 5, 0, ZoneOffset.UTC).toInstant(),
-                                         1767323045L, "global", 800, 1200, true, Map.of(), Set.of());
+                                         1767323045L, "global", 800, 1200, true, Map.of(1, Set.of("test")), Set.of(new GameInfo.Team(1, Set.of(2))));
 
         String json = serializeGameServer(new GameMessage.GameInfoList(List.of(gameInfo)));
 
@@ -153,14 +154,16 @@ class MessageSerializationTest {
                                       "featured_mod": "faf",
                                       "rating_type": "global",
                                       "sim_mods": {"uid-1": "Some Mod"},
-                                      "map_name": "scmp_007",
+                                      "mapname": "scmp_007",
                                       "map_file_path": "maps/scmp_007.zip",
                                       "hosted_at": "2026-01-02T03:04:05Z",
                                       "launched_at": 1767323045,
                                       "rating_min": 800,
                                       "rating_max": 1200,
-                                      "team_ids": [],
-                                      "teams": {},
+                                      "teams_ids": [{"team_id": 1, "player_ids": [2]}],
+                                      "teams": {
+                                          "1": ["test"]
+                                      },
                                       "enforce_rating_range": true
                                     }
                                   ]
@@ -293,14 +296,17 @@ class MessageSerializationTest {
         assertThat(deserializeGPGClient("""
                                         {"command": "GameState", "target": "game", "args": ["Launching"]}
                                         """), is(new GPGMessage.GameState(GPGMessage.GameState.State.Known.LAUNCHING)));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameState", "target": "game", "args": ["Ended"]}
+                                        """), is(new GPGMessage.GameState(GPGMessage.GameState.State.Known.ENDED)));
     }
 
     @Test
     void deserializeGPGGameStateUnknownValue() {
         assertThat(deserializeGPGClient("""
-                                        {"command": "GameState", "target": "game", "args": ["Ended"]}
+                                        {"command": "GameState", "target": "game", "args": ["End"]}
                                         """),
-                   is(new GPGMessage.GameState(new GPGMessage.GameState.State.Unknown("Ended"))));
+                   is(new GPGMessage.GameState(new GPGMessage.GameState.State.Unknown("End"))));
     }
 
     @Test
@@ -326,13 +332,27 @@ class MessageSerializationTest {
     }
 
     @Test
-    void deserializeGPGGameOptionWithIntValue() {
+    void deserializeGPGSlots() {
         assertThat(deserializeGPGClient("""
                                         {"command": "GameOption", "target": "game", "args": ["Slots", 8]}
-                                        """), is(new GameOption.Other("Slots", new OptionValue.Int(8))));
+                                        """), is(new GameOption.Slots(8)));
+    }
+
+    @Test
+    void deserializeGPGRestrictedCategories() {
         assertThat(deserializeGPGClient("""
                                         {"command": "GameOption", "target": "game", "args": ["RestrictedCategories", 0]}
-                                        """), is(new GameOption.Other("RestrictedCategories", new OptionValue.Int(0))));
+                                        """), is(new GameOption.RestrictedCategories(GameOption.TrueFalse.FALSE)));
+    }
+
+    @Test
+    void deserializeGPGGameOptionWithIntValue() {
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameOption", "target": "game", "args": ["Sots", 8]}
+                                        """), is(new GameOption.Other("Sots", new OptionValue.Int(8))));
+        assertThat(deserializeGPGClient("""
+                                        {"command": "GameOption", "target": "game", "args": ["Categories", 0]}
+                                        """), is(new GameOption.Other("Categories", new OptionValue.Int(0))));
     }
 
     @Test
@@ -374,8 +394,8 @@ class MessageSerializationTest {
 
     @Test
     void deserializeGameOptionIsHostOnly() {
-        assertThat(deserializeGameOption("Victory", "demoralization"), instanceOf(GPGMessage.Client.HostOnly.class));
-        assertThat(deserializeGameOption("UnitCap", "1000"), instanceOf(GPGMessage.Client.HostOnly.class));
+        assertThat(deserializeGameOption("Victory", "demoralization"), instanceOf(GPGMessage.Client.GameSetup.class));
+        assertThat(deserializeGameOption("UnitCap", "1000"), instanceOf(GPGMessage.Client.GameSetup.class));
     }
 
     @Test
@@ -408,9 +428,9 @@ class MessageSerializationTest {
     @Test
     void deserializeGameOptionUnranked() {
         assertThat(deserializeGameOption("Unranked", "true"),
-                   is(new GameOption.Unranked(GameOption.Unranked.Known.TRUE)));
+                   is(new GameOption.Unranked(GameOption.TrueFalse.TRUE)));
         assertThat(deserializeGameOption("Unranked", "false"),
-                   is(new GameOption.Unranked(GameOption.Unranked.Known.FALSE)));
+                   is(new GameOption.Unranked(GameOption.TrueFalse.FALSE)));
         assertThat(deserializeGameOption("Unranked", "maybe"),
                    is(new GameOption.Unranked(new GameOption.Unknown("maybe"))));
     }
@@ -418,9 +438,9 @@ class MessageSerializationTest {
     @Test
     void deserializeGameOptionCheatsEnabled() {
         assertThat(deserializeGameOption("CheatsEnabled", "true"),
-                   is(new GameOption.CheatsEnabled(GameOption.CheatsEnabled.Known.TRUE)));
+                   is(new GameOption.CheatsEnabled(GameOption.TrueFalse.TRUE)));
         assertThat(deserializeGameOption("CheatsEnabled", "false"),
-                   is(new GameOption.CheatsEnabled(GameOption.CheatsEnabled.Known.FALSE)));
+                   is(new GameOption.CheatsEnabled(GameOption.TrueFalse.FALSE)));
         assertThat(deserializeGameOption("CheatsEnabled", "sometimes"),
                    is(new GameOption.CheatsEnabled(new GameOption.Unknown("sometimes"))));
     }
@@ -449,8 +469,8 @@ class MessageSerializationTest {
         TOGGLE_VALUES.forEach(
                 (value, enabled) -> assertThat(String.valueOf(value), deserializeGameOption("Unranked", value),
                                                is(new GameOption.Unranked(enabled ?
-                                                                          GameOption.Unranked.Known.TRUE :
-                                                                          GameOption.Unranked.Known.FALSE))));
+                                                                          GameOption.TrueFalse.TRUE :
+                                                                          GameOption.TrueFalse.FALSE))));
     }
 
     @Test
@@ -458,8 +478,8 @@ class MessageSerializationTest {
         TOGGLE_VALUES.forEach(
                 (value, enabled) -> assertThat(String.valueOf(value), deserializeGameOption("CheatsEnabled", value),
                                                is(new GameOption.CheatsEnabled(enabled ?
-                                                                               GameOption.CheatsEnabled.Known.TRUE :
-                                                                               GameOption.CheatsEnabled.Known.FALSE))));
+                                                                               GameOption.TrueFalse.TRUE :
+                                                                               GameOption.TrueFalse.FALSE))));
     }
 
     @Test
@@ -504,9 +524,9 @@ class MessageSerializationTest {
     @Test
     void deserializeGameOptionPrebuiltUnits() {
         assertThat(deserializeGameOption("PrebuiltUnits", "Off"),
-                   is(new GameOption.PrebuiltUnits(GameOption.PrebuiltUnits.Known.OFF)));
+                   is(new GameOption.PrebuiltUnits(GameOption.TrueFalse.FALSE)));
         assertThat(deserializeGameOption("PrebuiltUnits", "On"),
-                   is(new GameOption.PrebuiltUnits(GameOption.PrebuiltUnits.Known.ON)));
+                   is(new GameOption.PrebuiltUnits(GameOption.TrueFalse.TRUE)));
         assertThat(deserializeGameOption("PrebuiltUnits", "Some"),
                    is(new GameOption.PrebuiltUnits(new GameOption.Unknown("Some"))));
     }
@@ -547,12 +567,20 @@ class MessageSerializationTest {
     }
 
     @Test
+    void deserializeAIReplacement() {
+        assertThat(deserializeGameOption("AIReplacement", "Off"),
+                   is(new GameOption.AIReplacement(GameOption.TrueFalse.FALSE)));
+    }
+
+    @Test
+    void deserializeRestrictedCategories() {
+        assertThat(deserializeGameOption("RestrictedCategories", 1),
+                   is(new GameOption.RestrictedCategories(GameOption.TrueFalse.TRUE)));
+    }
+
+    @Test
     void deserializeGameOptionDocumentedKeysWithoutDedicatedTypeAsOther() {
         // Documented keys the service has no dedicated type for keep their raw key and value
-        assertThat(deserializeGameOption("AIReplacement", "Off"),
-                   is(new GameOption.Other("AIReplacement", new OptionValue.Str("Off"))));
-        assertThat(deserializeGameOption("RestrictedCategories", 1),
-                   is(new GameOption.Other("RestrictedCategories", new OptionValue.Int(1))));
         assertThat(deserializeGameOption("UnitCap", "1000"),
                    is(new GameOption.Other("UnitCap", new OptionValue.Str("1000"))));
     }
@@ -695,14 +723,14 @@ class MessageSerializationTest {
         assertThat(deserializeGPGClient("""
                                         {"command": "GameMods", "target": "game", "args": ["uids", "e7846e9b-23a4-4b95-ae3a-fb69b289a585"]}
                                         """),
-                   is(new GPGMessage.GameMods.Uids(List.of("e7846e9b-23a4-4b95-ae3a-fb69b289a585"))));
+                   is(new GPGMessage.GameMods.Uids(Set.of("e7846e9b-23a4-4b95-ae3a-fb69b289a585"))));
     }
 
     @Test
     void deserializeGPGGameModsMultipleUidsAreSpaceSeparated() {
         assertThat(deserializeGPGClient("""
                                         {"command": "GameMods", "target": "game", "args": ["uids", "uid-a uid-b uid-c"]}
-                                        """), is(new GPGMessage.GameMods.Uids(List.of("uid-a", "uid-b", "uid-c"))));
+                                        """), is(new GPGMessage.GameMods.Uids(Set.of("uid-a", "uid-b", "uid-c"))));
     }
 
     @Test
@@ -789,11 +817,11 @@ class MessageSerializationTest {
 
         assertThat(deserializeGPGClient("""
                                         {"command": "GameResult", "target": "game", "args": [1, "victory 10"]}
-                                        """), is(new GPGMessage.GameResult(1, "victory 10")));
+                                        """), is(new GPGMessage.GameResult(1, new ResultDetails(ResultDetails.Type.Known.VICTORY, 10, List.of()))));
     }
 
     /**
-     * The doc's example signalling message: the JSON text of the adapter's CandidatesMessage.
+     * The doc's example signaling message: the JSON text of the adapter's CandidatesMessage.
      */
     private static final String CANDIDATES_MESSAGE = """
                                                      {
@@ -859,15 +887,15 @@ class MessageSerializationTest {
     /**
      * Wraps a JsonStats payload document in the GPG envelope, where it travels as a single string arg.
      */
-    private GPGMessage.JsonStats deserializeGPGJsonStatsContent(String payloadJson) {
-        return (GPGMessage.JsonStats) deserializeGPGClient(jsonMapper.writeValueAsString(
+    private GPGMessage.Client deserializeGPGJsonStats(String payloadJson) {
+        return deserializeGPGClient(jsonMapper.writeValueAsString(
                 Map.of("command", "JsonStats", "target", "game", "args", List.of(payloadJson))));
     }
 
     @Test
     void deserializeGPGJsonStats() {
         // The example from the doc's JsonStats schema
-        GPGMessage.Client message = deserializeGPGJsonStatsContent("""
+        GPGMessage.Client message = deserializeGPGJsonStats("""
                                                                    {
                                                                    	"stats": [
                                                                    		{
@@ -1005,7 +1033,7 @@ class MessageSerializationTest {
     void deserializeGPGJsonStatsWithCivilianGapDefeatedAndAi() {
         // A civilian army between two players leaves a null; Defeated appears once an army is defeated;
         // blueprints is optional
-        GPGMessage.JsonStats message = deserializeGPGJsonStatsContent("""
+        GPGMessage.Client message = deserializeGPGJsonStats("""
                                                                    {
                                                                    	"stats": [
                                                                    		{
@@ -1035,7 +1063,7 @@ class MessageSerializationTest {
                                                                    """);
 
         assertThat(message, instanceOf(GPGMessage.JsonStats.class));
-        List<JsonStatsPayload.ArmyStats> stats = message.payload().stats();
+        List<JsonStatsPayload.ArmyStats> stats = ((GPGMessage.JsonStats) message).payload().stats();
         assertThat(stats.size(), is(3));
         assertThat(stats.getFirst().faction(), is(Faction.SERAPHIM));
         assertThat(stats.getFirst().defeated(), is(-1.0));
@@ -1048,7 +1076,7 @@ class MessageSerializationTest {
 
     @Test
     void deserializeGPGJsonStatsUnknownBrainType() {
-        GPGMessage.JsonStats message = deserializeGPGJsonStatsContent("""
+        GPGMessage.Client message = deserializeGPGJsonStats("""
                                                                       {
                                                                       	"stats": [
                                                                       		{
@@ -1062,7 +1090,8 @@ class MessageSerializationTest {
                                                                       	]
                                                                       }""");
 
-        JsonStatsPayload.ArmyStats armyStats = message.payload().stats().getFirst();
+        assertThat(message, instanceOf(GPGMessage.JsonStats.class));
+        JsonStatsPayload.ArmyStats armyStats = ((GPGMessage.JsonStats) message).payload().stats().getFirst();
         assertThat(armyStats, notNullValue());
         assertThat(armyStats.type(), is(new JsonStatsPayload.BrainType.Unknown("Spectator")));
     }
@@ -1070,7 +1099,7 @@ class MessageSerializationTest {
     @Test
     void deserializeGPGJsonStatsIgnoresUnknownFields() {
         // Fields the doc doesn't list (e.g. from a newer game build) must not invalidate the stats
-        GPGMessage.JsonStats message = deserializeGPGJsonStatsContent("""
+        GPGMessage.Client message = deserializeGPGJsonStats("""
                                                                    {
                                                                    	"version": 2,
                                                                    	"stats": [
@@ -1122,7 +1151,7 @@ class MessageSerializationTest {
                                                                    """);
 
         assertThat(message, instanceOf(GPGMessage.JsonStats.class));
-        JsonStatsPayload.ArmyStats army = message.payload().stats().getFirst();
+        JsonStatsPayload.ArmyStats army = ((GPGMessage.JsonStats) message).payload().stats().getFirst();
         assertThat(army, notNullValue());
         assertThat(army.general().score(), is(10));
         assertThat(army.general().kills(), is(new JsonStatsPayload.CountMassEnergy(1, 2.0, 3.0)));
@@ -1134,13 +1163,13 @@ class MessageSerializationTest {
 
     @Test
     void deserializeGPGJsonStatsMalformedJsonAsInvalid() {
-        assertThat(deserializeGPGJsonStatsContent("{\"stats\":["),
+        assertThat(deserializeGPGJsonStats("{\"stats\":["),
                    is(new GPGMessage.Invalid("JsonStats", List.of("{\"stats\":["))));
     }
 
     @Test
     void deserializeGPGJsonStatsWrongShapeAsInvalid() {
-        assertThat(deserializeGPGJsonStatsContent("{\"stats\":\"none\"}"),
+        assertThat(deserializeGPGJsonStats("{\"stats\":\"none\"}"),
                    is(new GPGMessage.Invalid("JsonStats", List.of("{\"stats\":\"none\"}"))));
     }
 

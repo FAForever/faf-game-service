@@ -1,4 +1,4 @@
-package com.faforever.server.game;
+package com.faforever.server.game.dto;
 
 import com.faforever.server.message.client.dto.Faction;
 import org.jspecify.annotations.Nullable;

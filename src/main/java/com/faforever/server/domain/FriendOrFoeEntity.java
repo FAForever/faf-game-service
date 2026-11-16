@@ -18,7 +18,6 @@ import lombok.Setter;
 @Entity
 @Table(name = "friends_and_foes")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@AllArgsConstructor
 public class FriendOrFoeEntity {
 
     @EmbeddedId

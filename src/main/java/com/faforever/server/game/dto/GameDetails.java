@@ -1,4 +1,4 @@
-package com.faforever.server.game;
+package com.faforever.server.game.dto;
 
 import com.faforever.server.message.client.dto.GameType;
 import org.jspecify.annotations.Nullable;
@@ -9,6 +9,7 @@ public record GameDetails(
         String leaderboard,
         GameType gameType,
         String featuredMod,
-        GamePlayer host,
+        int hostId,
+        String hostName,
         RatingRange ratingRange
 ) {}

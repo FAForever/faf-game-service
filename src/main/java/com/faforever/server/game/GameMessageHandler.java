@@ -1,12 +1,14 @@
 package com.faforever.server.game;
 
 import com.faforever.server.domain.FriendOrFoeEntity;
+import com.faforever.server.game.dto.GameDetails;
+import com.faforever.server.game.dto.RatingRange;
+import com.faforever.server.game.dto.Visibility;
 import com.faforever.server.message.client.GameMessage;
 import com.faforever.server.message.client.dto.GameType;
 import com.faforever.server.message.service.InboundGameMessage;
-import com.faforever.server.player.FriendOrFoeRepository;
 import com.faforever.server.player.Player;
-import com.faforever.server.player.PlayerStateTracker;
+import com.faforever.server.player.PlayerTracker;
 import jakarta.enterprise.context.ApplicationScoped;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
@@ -15,18 +17,18 @@ import java.nio.charset.StandardCharsets;
 
 @Slf4j
 @ApplicationScoped
-public class GameService {
+public class GameMessageHandler {
 
-    private final PlayerStateTracker playerStateTracker;
-    private final GameStateTracker gameStateTracker;
+    private final PlayerTracker playerTracker;
+    private final GameTracker gameTracker;
 
-    private final FriendOrFoeRepository friendOrFoeRepository;
+    private final GameMessageHandlerRepository gameMessageHandlerRepository;
 
-    GameService(PlayerStateTracker playerStateTracker, GameStateTracker gameStateTracker,
-                FriendOrFoeRepository friendOrFoeRepository) {
-        this.playerStateTracker = playerStateTracker;
-        this.gameStateTracker = gameStateTracker;
-        this.friendOrFoeRepository = friendOrFoeRepository;
+    GameMessageHandler(PlayerTracker playerTracker, GameTracker gameTracker,
+                       GameMessageHandlerRepository gameMessageHandlerRepository) {
+        this.playerTracker = playerTracker;
+        this.gameTracker = gameTracker;
+        this.gameMessageHandlerRepository = gameMessageHandlerRepository;
     }
 
     @Incoming("game-inbound")
@@ -41,7 +43,7 @@ public class GameService {
     }
 
     private void hostGame(long sessionId, GameMessage.HostGameRequest hostMessage) {
-        Player player = playerStateTracker.getPlayerForSession(sessionId);
+        Player player = playerTracker.getPlayerForSession(sessionId);
         if (player == null) {
             throw new IllegalStateException("session not associated with a player");
         }
@@ -71,27 +73,27 @@ public class GameService {
 
         Visibility visibility = switch (hostMessage.visibility()) {
             case PUBLIC -> new Visibility.Public(
-                    friendOrFoeRepository.loadFriendsAndFoes(player.getId(), FriendOrFoeEntity.Status.FOE));
+                    gameMessageHandlerRepository.loadFriendsAndFoes(player.getId(), FriendOrFoeEntity.Status.FOE));
             case PRIVATE -> new Visibility.Private(
-                    friendOrFoeRepository.loadFriendsAndFoes(player.getId(), FriendOrFoeEntity.Status.FRIEND));
+                    gameMessageHandlerRepository.loadFriendsAndFoes(player.getId(), FriendOrFoeEntity.Status.FRIEND));
         };
 
-        gameStateTracker.hostGame(sessionId, title, mapName,
-                                  new GameDetails(visibility, hostMessage.password(), "global", GameType.CUSTOM,
-                                                  hostMessage.featuredMod() == null ? "faf" : featuredMod,
-                                                  new GamePlayer(player.getId(), player.getUsername()),
-                                                  new RatingRange(enforceRatingRange, ratingMin, ratingMax)));
+        gameTracker.hostGame(sessionId, title, mapName,
+                             new GameDetails(visibility, hostMessage.password(), "global", GameType.CUSTOM,
+                                             hostMessage.featuredMod() == null ? "faf" : featuredMod, player.getId(),
+                                             player.getUsername(),
+                                             new RatingRange(enforceRatingRange, ratingMin, ratingMax)));
     }
 
     private void joinGame(long sessionId, GameMessage.JoinGameRequest joinMessage) {
-        Player player = playerStateTracker.getPlayerForSession(sessionId);
+        Player player = playerTracker.getPlayerForSession(sessionId);
         if (player == null) {
             throw new IllegalStateException("session not associated with a player");
         }
 
         int gameId = joinMessage.gameId();
 
-        gameStateTracker.joinGame(sessionId, gameId, joinMessage.password());
+        gameTracker.joinGame(sessionId, gameId, joinMessage.password());
     }
 
     private void restoreGameSession(long sessionId, GameMessage.RestoreGameSessionRequest restoreMessage) {

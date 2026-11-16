@@ -17,7 +17,7 @@ public class MDCInterceptor {
 
     public static final String COMMAND = "command";
     public static final String REQUEST_ID = "requestId";
-    public static final String PLAYER_ID = "playerId";
+    public static final String PLAYER_ID = "id";
     public static final String SESSION_ID = "sessionId";
     public static final String GAME_ID = "gameId";
 

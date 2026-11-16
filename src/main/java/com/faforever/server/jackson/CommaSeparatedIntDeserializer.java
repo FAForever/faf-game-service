@@ -12,7 +12,7 @@ public class CommaSeparatedIntDeserializer extends ValueDeserializer<List<Intege
     @Override
     public List<Integer> deserialize(JsonParser p, DeserializationContext ctxt) {
         String value = p.getString();
-        if (value == null || value.trim().isEmpty()) {
+        if (value == null || value.isBlank()) {
             return List.of();
         }
         try {

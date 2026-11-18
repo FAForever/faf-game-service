@@ -88,9 +88,9 @@ public class PlayerTracker {
                                              resolver = PlayerSessionStateResolver.class) PlayerSessionState playerSessionStatus) {
         switch (playerSessionStatus.state()) {
             case PlayerSessionState.State.New(Duration secondsToExpiry) -> {
-                registerPlayerSession(playerSessionStatus.sessionId(), playerSessionStatus.playerId(),
-                                      secondsToExpiry);
-                gameTracker.sendGamesToSession(playerSessionStatus.sessionId());
+                Player player = registerPlayerSession(playerSessionStatus.sessionId(), playerSessionStatus.playerId(),
+                                                      secondsToExpiry);
+                gameTracker.sendGamesToSession(playerSessionStatus.sessionId(), player);
                 LOG.info("Registered new session");
             }
 
@@ -101,7 +101,7 @@ public class PlayerTracker {
         }
     }
 
-    private void registerPlayerSession(long sessionId, int playerId, Duration secondsToExpiry) {
+    private Player registerPlayerSession(long sessionId, int playerId, Duration secondsToExpiry) {
         LOG.debug("Registering session");
         SessionDetails sessionDetails = sessionMap.computeIfAbsent(sessionId, _ -> new SessionDetails(playerId,
                                                                                                       clock.instant()
@@ -112,7 +112,7 @@ public class PlayerTracker {
         }
         sessionDetails.setExpirationTime(clock.instant().plus(secondsToExpiry));
 
-        playerIdMap.compute(playerId, (id, player) -> {
+        return playerIdMap.compute(playerId, (id, player) -> {
             if (player == null) {
                 player = initializePlayer(id);
             }

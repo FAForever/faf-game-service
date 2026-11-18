@@ -6,11 +6,6 @@ public sealed interface FAFMap {
 
     boolean ranked();
 
-    @Deprecated
-    default String mapFilePath() {
-        return "maps/" + mapName() + ".zip";
-    }
-
     record Vault(
             int mapVersionId,
             String mapName,

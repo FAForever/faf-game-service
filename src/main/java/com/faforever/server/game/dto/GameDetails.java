@@ -9,7 +9,6 @@ public record GameDetails(
         String leaderboard,
         GameType gameType,
         String featuredMod,
-        int hostId,
-        String hostName,
+        GamePlayer host,
         RatingRange ratingRange
 ) {}

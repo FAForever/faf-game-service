@@ -22,7 +22,6 @@ public record GameInfo(
         @JsonProperty("rating_type") String leaderboard,
         Map<String, String> simMods,
         @JsonProperty("mapname") String mapName,
-        String mapFilePath,
         @Nullable Instant hostedAt,
         @Nullable Long launchedAt,
         @Nullable String ratingType,
@@ -37,6 +36,12 @@ public record GameInfo(
     @JsonProperty("command")
     public String command() {
         return GameMessage.GameInfoList.COMMAND;
+    }
+
+    @Deprecated
+    @JsonProperty("map_file_path")
+    public String mapFilePath() {
+        return "maps/" + mapName + ".zip";
     }
 
     public record Team(

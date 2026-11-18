@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -48,6 +49,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Function;
 
 @Slf4j
 @Dependent
@@ -69,6 +71,7 @@ class GameHandler {
     private final Map<Integer, PlayerDetails> playerIdMap = new ConcurrentHashMap<>();
 
     private final LongAdder desyncs = new LongAdder();
+    private final GameHandlerRepository gameHandlerRepository;
 
     private @Nullable GameDetails details;
     private @Nullable Instant hostedAt;
@@ -80,7 +83,7 @@ class GameHandler {
                 @Channel("lobby-outbound") Emitter<OutboundGPGMessage<GPGMessage.Server>> gpgEmitter,
                 @Channel("lobby-outbound") Emitter<OutboundGameMessage<GameMessage.Server>> lobbyEmitter,
                 @ConfigProperty(name = "faf.max-message-queue-size", defaultValue = "0") int maxMessageQueueSize,
-                GameSettings gameSettings) {
+                GameSettings gameSettings, GameHandlerRepository gameHandlerRepository) {
         this.gameTracker = gameTracker;
         this.gpgEmitter = gpgEmitter;
         this.lobbyEmitter = lobbyEmitter;
@@ -89,22 +92,83 @@ class GameHandler {
         this.gameSettings = gameSettings;
         gpgDroppedMessageCounter = meterRegistry.counter("faf.gpg.messages.dropped");
         gameId = gameTracker.nextGameId();
+        this.gameHandlerRepository = gameHandlerRepository;
     }
 
-    @MDCPopulated
-    void accept(InboundGPGMessage<GPGMessage.Client> message) {
-        gpgMessageExecutor.execute(() -> {
-            MDC.put(MDCInterceptor.SESSION_ID, String.valueOf(message.sessionId()));
-            MDC.put(MDCInterceptor.PLAYER_ID, String.valueOf(message.playerId()));
-            MDC.put(MDCInterceptor.GAME_ID, String.valueOf(gameId));
-            try {
-                handleGPGMessage(message);
-            } finally {
-                MDC.remove(MDCInterceptor.SESSION_ID);
-                MDC.remove(MDCInterceptor.PLAYER_ID);
-                MDC.remove(MDCInterceptor.GAME_ID);
+    private ThreadPoolExecutor createMessageExecutor(int queueSize) {
+        ThreadFactory threadFactory = Thread.ofVirtual()
+                                            .name("gpg-" + gameId + "-", 0)
+                                            .uncaughtExceptionHandler((_, _) -> {})
+                                            .factory();
+        return new ThreadPoolExecutor(0, 1, 0, TimeUnit.SECONDS, new LinkedBlockingQueue<>(queueSize), threadFactory,
+                                      (_, executor) -> {
+                                          MDC.put(MDCInterceptor.GAME_ID, String.valueOf(gameId));
+                                          if (executor.isShutdown()) {
+                                              LOG.info("Dropping gpg message queued after game closed");
+                                          } else {
+                                              LOG.warn("Unable to queue gpg message due to full capacity");
+                                              gpgDroppedMessageCounter.increment();
+                                          }
+                                          MDC.remove(MDCInterceptor.GAME_ID);
+                                      }) {
+
+            @Override
+            protected void afterExecute(Runnable r, @Nullable Throwable t) {
+                super.afterExecute(r, t);
+                if (t != null) {
+                    LOG.warn("Unable to process gpg message", t);
+                }
             }
+        };
+    }
+
+    @Nullable GameInfo createGameInfo() {
+        if (details == null) {
+            return null;
+        }
+
+        GameStatus gameStatus = switch (state) {
+            case LOBBY -> GameStatus.OPEN;
+            case LIVE -> GameStatus.PLAYING;
+            case INITIALIZING, ENDED -> GameStatus.CLOSED;
+        };
+        Map<Integer, Set<Integer>> teamPlayerMap = gameSettings.getTeamPlayerMap();
+        Set<GameInfo.Team> teamIds = new HashSet<>();
+        Map<Integer, Set<String>> teams = new HashMap<>();
+
+        teamPlayerMap.forEach((teamId, playerIds) -> {
+            Set<String> teamPlayerNames = new HashSet<>(playerIds.size());
+            Set<Integer> teamPlayerIds = new HashSet<>(playerIds.size());
+            playerIds.stream()
+                     .map(playerIdMap::get)
+                     .filter(Objects::nonNull)
+                     .filter(playerDetails -> playerDetails.getState() == PlayerState.CONNECTED)
+                     .forEach(playerDetails -> {
+                         teamPlayerNames.add(playerDetails.getName());
+                         teamPlayerIds.add(playerDetails.getId());
+                     });
+            teams.put(teamId, teamPlayerNames);
+            teamIds.add(new GameInfo.Team(teamId, teamPlayerIds));
         });
+
+        int numActivePlayers = (int) teamIds.stream()
+                                            .filter(team -> team.teamId() > 0)
+                                            .map(GameInfo.Team::playerIds)
+                                            .mapToLong(Collection::size)
+                                            .sum();
+
+        RatingRange ratingRange = details.ratingRange();
+        GameVisibility visibility = switch (details.visibility()) {
+            case Visibility.Private _ -> GameVisibility.PRIVATE;
+            case Visibility.Public _ -> GameVisibility.PUBLIC;
+        };
+        FAFMap map = gameSettings.getMap();
+        return new GameInfo(gameId, gameSettings.getGameTitle(), details.host().name(), details.gameType(),
+                            gameSettings.getNumSlots(), numActivePlayers, visibility, details.password() != null,
+                            gameStatus, details.featuredMod(), details.leaderboard(), gameSettings.getSimMods(),
+                            map.mapName(), hostedAt,
+                            launchedAt == null ? null : launchedAt.getEpochSecond(), details.leaderboard(),
+                            ratingRange.min(), ratingRange.max(), ratingRange.enforce(), teams, teamIds);
     }
 
     void initializeDetails(String title, String mapName, GameDetails gameDetails) {
@@ -150,6 +214,77 @@ class GameHandler {
         lobbyEmitter.send(OutboundGameMessage.forSession(sessionId, gameLaunchResponse));
     }
 
+    boolean updatePlayerSession(int playerId, long sessionId) {
+        PlayerDetails playerDetails = playerIdMap.get(playerId);
+        if (playerDetails == null) {
+            LOG.warn("Trying to update session for player that is not connected to the game");
+            return false;
+        }
+        gameTracker.removeConnectionToGame(playerDetails.getSessionId(), this);
+        playerDetails.setSessionId(sessionId);
+        return true;
+    }
+
+    boolean isJoinable() {
+        return details != null && switch (details.gameType()) {
+            case COOP, CUSTOM -> true;
+            default -> false;
+        } && state == State.LOBBY;
+    }
+
+    boolean passwordMatches(@Nullable String password) {
+        return details != null && (details.password() == null || details.password().equals(password));
+    }
+
+    boolean isVisibleToPlayer(Player player) {
+        return isVisibleToPlayer(player.getId(), player::getRating);
+    }
+
+    boolean isVisibleToPlayer(GamePlayer player) {
+        return isVisibleToPlayer(player.id(),
+                                 leaderboard -> gameHandlerRepository.loadPlayerRating(player.id(), leaderboard));
+    }
+
+    private boolean isVisibleToPlayer(int playerId, Function<String, Optional<LeaderboardRating>> ratingFunction) {
+        if (details == null) {
+            return false;
+        }
+
+        if (state != State.LOBBY) {
+            return true;
+        }
+
+        if (playerIdMap.containsKey(playerId)) {
+            return true;
+        }
+
+        if (!details.visibility().isVisibleTo(playerId)) {
+            return false;
+        }
+
+        //TODO: check if 0 is appropriate
+        return details.ratingRange()
+                      .inRange(ratingFunction.apply(details.leaderboard())
+                                             .map(LeaderboardRating::displayedRating)
+                                             .orElse(0d));
+    }
+
+    @MDCPopulated
+    void accept(InboundGPGMessage<GPGMessage.Client> message) {
+        gpgMessageExecutor.execute(() -> {
+            MDC.put(MDCInterceptor.SESSION_ID, String.valueOf(message.sessionId()));
+            MDC.put(MDCInterceptor.PLAYER_ID, String.valueOf(message.playerId()));
+            MDC.put(MDCInterceptor.GAME_ID, String.valueOf(gameId));
+            try {
+                handleGPGMessage(message);
+            } finally {
+                MDC.remove(MDCInterceptor.SESSION_ID);
+                MDC.remove(MDCInterceptor.PLAYER_ID);
+                MDC.remove(MDCInterceptor.GAME_ID);
+            }
+        });
+    }
+
     private void handleGPGMessage(InboundGPGMessage<GPGMessage.Client> message) {
         if (details == null) {
             throw new IllegalStateException("GPG message received before game details set");
@@ -163,7 +298,7 @@ class GameHandler {
             throw new IllegalStateException("GPG message received for player not associated with game");
         }
 
-        int hostId = details.hostId();
+        int hostId = details.host().id();
         boolean isHost = playerId == hostId;
         switch (message.message().content()) {
             case GPGMessage.Client.GameSetup gameSetup -> {
@@ -181,7 +316,8 @@ class GameHandler {
             case GPGMessage.Desync _ -> desyncs.increment();
             case GPGMessage.Disconnected disconnected -> LOG.debug("Player disconnected: {}", disconnected);
             case GPGMessage.GameEnded _ -> {
-//        game.checkGameFinish(sessionController.getPlayer());
+                player.setState(PlayerState.ENDED);
+                endIfFinished();
             }
             case GPGMessage.GameFull _ -> LOG.debug("Game is full");
             case GPGMessage.GameResult gameResult -> {
@@ -193,12 +329,12 @@ class GameHandler {
 //                    String resultType = parts[parts.length - 2];
 //                    int score = Integer.parseInt(parts[parts.length - 1]);
 
-                    //            game.addResult(
-                    //                sessionController.getPlayer().getId(),
-                    //                army,
-                    //                resultType,
-                    //                score
-                    //            );
+                //            game.addResult(
+                //                sessionController.getPlayer().getId(),
+                //                army,
+                //                resultType,
+                //                score
+                //            );
 //                }
             }
             case GPGMessage.GameState(GPGMessage.GameState.State messageState) -> {
@@ -208,13 +344,21 @@ class GameHandler {
                         if (isHost) {
                             hostGame(sessionId);
                         } else {
-                            joinGame(hostId, sessionId, player, playerId);
+                            PlayerDetails hostDetails = playerIdMap.get(hostId);
+                            if (hostDetails == null) {
+                                lobbyEmitter.send(OutboundGameMessage.forSession(player.getSessionId(),
+                                                                                 new GameMessage.GameJoinFailed(
+                                                                                         "host_left_game", gameId)));
+                            } else {
+                                joinGame(hostDetails, player);
+                            }
                         }
                         player.setState(PlayerState.CONNECTED);
                         markDirty();
                     }
                     case GPGMessage.GameState.State.Known.LAUNCHING -> {
                         if (!isHost) {
+                            LOG.debug("Non host launching");
                             return;
                         }
 
@@ -230,16 +374,13 @@ class GameHandler {
                         markDirty();
                     }
                     case GPGMessage.GameState.State.Known.ENDED -> {
-                        playerIdMap.remove(playerId);
-                        if (state == State.LOBBY) {
-                            gameSettings.removePlayer(playerId);
-                        }
+                        LOG.info("player left");
+                        removePlayer(playerId);
                         markDirty();
                         endIfFinished();
                     }
-                    case GPGMessage.GameState.State.Unknown(String unknownState) -> {
-                        LOG.warn("Unknown game state received {}", unknownState);
-                    }
+                    case GPGMessage.GameState.State.Unknown(String unknownState) ->
+                            LOG.warn("Unknown game state received {}", unknownState);
                 }
             }
             case GPGMessage.IceMsg iceMsg -> {
@@ -282,33 +423,36 @@ class GameHandler {
         }
     }
 
-    private void joinGame(int hostId, long sessionId, PlayerDetails player, int playerId) {
-        LOG.info("Joining game");
-
-        PlayerDetails hostDetails = playerIdMap.get(hostId);
-        if (hostDetails == null) {
-            lobbyEmitter.send(OutboundGameMessage.forSession(sessionId,
-                                                                new GameMessage.GameJoinFailed("host_left_game",
-                                                                                               gameId)));
+    private void removePlayer(int playerId) {
+        PlayerDetails playerDetails = playerIdMap.remove(playerId);
+        if (state == State.LOBBY) {
+            gameSettings.removePlayer(playerId);
+        }
+        if (playerDetails == null) {
             return;
         }
+        gameTracker.removeConnectionToGame(playerDetails.getSessionId(), this);
+    }
 
-        gpgEmitter.send(
-                OutboundGPGMessage.forSession(sessionId, new GPGMessage.JoinGame(hostDetails.getName(), hostId)));
+    private void joinGame(PlayerDetails hostDetails, PlayerDetails player) {
+        LOG.info("Joining game");
+
+        gpgEmitter.send(OutboundGPGMessage.forSession(player.getSessionId(),
+                                                      new GPGMessage.JoinGame(hostDetails.getName(),
+                                                                              hostDetails.getId())));
         gpgEmitter.send(OutboundGPGMessage.forSession(hostDetails.getSessionId(),
-                                                      new GPGMessage.ConnectToPeer(player.getName(), playerId, true)));
+                                                      new GPGMessage.ConnectToPeer(player.getName(), player.getId(),
+                                                                                   true)));
         playerIdMap.forEach((peerId, peerDetails) -> {
-            if (peerId == hostId || peerDetails.getState() != PlayerState.CONNECTED) {
+            if (peerId == hostDetails.getId() || peerDetails.getState() != PlayerState.CONNECTED) {
                 return;
             }
 
-            long peerSessionId = peerDetails.getSessionId();
-
-            gpgEmitter.send(OutboundGPGMessage.forSession(sessionId,
+            gpgEmitter.send(OutboundGPGMessage.forSession(player.getSessionId(),
                                                           new GPGMessage.ConnectToPeer(peerDetails.getName(), peerId,
                                                                                        true)));
-            gpgEmitter.send(OutboundGPGMessage.forSession(peerSessionId,
-                                                          new GPGMessage.ConnectToPeer(player.getName(), playerId,
+            gpgEmitter.send(OutboundGPGMessage.forSession(peerDetails.getSessionId(),
+                                                          new GPGMessage.ConnectToPeer(player.getName(), player.getId(),
                                                                                        false)));
         });
     }
@@ -327,8 +471,8 @@ class GameHandler {
         }
 
         switch (state) {
-            case LOBBY -> LOG.info("Game cancelled pre launch");
             case INITIALIZING -> LOG.info("Game cancelled pre initalization");
+            case LOBBY -> LOG.info("Game cancelled pre launch");
             case LIVE -> {
                 LOG.info("Game finished normally");
                 if (desyncs.sum() > 20) {
@@ -336,8 +480,22 @@ class GameHandler {
                 }
             }
         }
+        closeGame();
+    }
+
+    private void closeGame() {
         state = State.ENDED;
-        markDirty();
+
+        playerIdMap.values()
+                   .forEach(playerDetails -> gameTracker.removeConnectionToGame(playerDetails.getSessionId(), this));
+        gameTracker.removeGame(this);
+        gpgMessageExecutor.shutdown();
+        GameInfo gameInfo = createGameInfo();
+        if (gameInfo == null) {
+            return;
+        }
+
+        gameTracker.stageUpdate(gameInfo, this::isVisibleToPlayer);
     }
 
     private boolean playersStillConnected() {
@@ -347,8 +505,8 @@ class GameHandler {
     private boolean hostPresentInLobby() {
         return details == null ||
                (state == State.LOBBY &&
-                playerIdMap.get(details.hostId()) != null &&
-                playerIdMap.get(details.hostId()).getState() != PlayerState.ENDED);
+                playerIdMap.get(details.host().id()) != null &&
+                playerIdMap.get(details.host().id()).getState() != PlayerState.ENDED);
     }
 
     private void markDirty() {
@@ -364,118 +522,7 @@ class GameHandler {
         }
     }
 
-    @Nullable GameInfo createGameInfo() {
-        if (details == null) {
-            return null;
-        }
-
-        GameStatus gameStatus = switch (state) {
-            case LOBBY -> GameStatus.OPEN;
-            case LIVE -> GameStatus.PLAYING;
-            case INITIALIZING, ENDED -> GameStatus.CLOSED;
-        };
-        Map<Integer, Set<Integer>> teamPlayerMap = gameSettings.getTeamPlayerMap();
-        Set<GameInfo.Team> teamIds = new HashSet<>();
-        Map<Integer, Set<String>> teams = new HashMap<>();
-
-        teamPlayerMap.forEach((teamId, playerIds) -> {
-            Set<String> teamPlayerNames = new HashSet<>(playerIds.size());
-            Set<Integer> teamPlayerIds = new HashSet<>(playerIds.size());
-            playerIds.stream()
-                     .map(playerIdMap::get)
-                     .filter(Objects::nonNull)
-                     .filter(playerDetails -> playerDetails.getState() == PlayerState.CONNECTED)
-                     .forEach(playerDetails -> {
-                         teamPlayerNames.add(playerDetails.getName());
-                         teamPlayerIds.add(playerDetails.getId());
-                     });
-            teams.put(teamId, teamPlayerNames);
-            teamIds.add(new GameInfo.Team(teamId, teamPlayerIds));
-        });
-
-        int numActivePlayers = (int) teamIds.stream()
-                                            .filter(team -> team.teamId() > 0)
-                                            .map(GameInfo.Team::playerIds)
-                                            .mapToLong(Collection::size)
-                                            .sum();
-
-        RatingRange ratingRange = details.ratingRange();
-        GameVisibility visibility = switch (details.visibility()) {
-            case Visibility.Private _ -> GameVisibility.PRIVATE;
-            case Visibility.Public _ -> GameVisibility.PUBLIC;
-        };
-        FAFMap map = gameSettings.getMap();
-        return new GameInfo(gameId, gameSettings.getGameTitle(), details.hostName(), details.gameType(),
-                            gameSettings.getNumSlots(), numActivePlayers, visibility, details.password() != null,
-                            gameStatus, details.featuredMod(), details.leaderboard(), gameSettings.getSimMods(),
-                            map.mapName(), map.mapFilePath(), hostedAt,
-                            launchedAt == null ? null : launchedAt.getEpochSecond(), details.leaderboard(),
-                            ratingRange.min(), ratingRange.max(), ratingRange.enforce(), teams, teamIds);
-    }
-
-    private ThreadPoolExecutor createMessageExecutor(int queueSize) {
-        ThreadFactory threadFactory = Thread.ofVirtual()
-                                            .name("gpg-" + gameId + "-", 0)
-                                            .uncaughtExceptionHandler((_, _) -> {})
-                                            .factory();
-        return new ThreadPoolExecutor(0, 1, 0, TimeUnit.SECONDS, new LinkedBlockingQueue<>(queueSize), threadFactory,
-                                      (_, executor) -> {
-                                          MDC.put(MDCInterceptor.GAME_ID, String.valueOf(gameId));
-                                          if (executor.isShutdown()) {
-                                              LOG.info("Dropping gpg message queued after game closed");
-                                          } else {
-                                              LOG.warn("Unable to queue gpg message due to full capacity");
-                                              gpgDroppedMessageCounter.increment();
-                                          }
-                                          MDC.remove(MDCInterceptor.GAME_ID);
-                                      }) {
-
-            @Override
-            protected void afterExecute(Runnable r, @Nullable Throwable t) {
-                super.afterExecute(r, t);
-                if (t != null) {
-                    LOG.warn("Unable to process gpg message", t);
-                }
-            }
-        };
-    }
-
-    boolean isJoinable() {
-        return details != null && switch (details.gameType()) {
-            case COOP, CUSTOM -> true;
-            default -> false;
-        } && state == State.LOBBY;
-    }
-
-    boolean passwordMatches(@Nullable String password) {
-        return details != null && (details.password() == null || details.password().equals(password));
-    }
-
-    boolean isVisibleToPlayer(Player player) {
-        if (details == null) {
-            return false;
-        }
-
-        if (state != State.LOBBY) {
-            return true;
-        }
-
-        if (playerIdMap.containsKey(player.getId())) {
-            return true;
-        }
-
-        if (!details.visibility().isVisibleTo(player.getId())) {
-            return false;
-        }
-
-        //TODO: check if 0 is appropriate
-        return details.ratingRange()
-                      .inRange(player.getRating(details.leaderboard())
-                                     .map(LeaderboardRating::displayedRating)
-                                     .orElse(0d));
-    }
-
-    enum State {
+    private enum State {
         INITIALIZING, LOBBY, LIVE, ENDED
     }
 

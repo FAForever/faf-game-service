@@ -10,7 +10,6 @@ import com.faforever.server.message.service.InboundGPGMessage;
 import com.faforever.server.message.service.OutboundGameMessage;
 import com.faforever.server.player.Player;
 import com.faforever.server.player.PlayerTracker;
-import io.quarkus.logging.Log;
 import io.quarkus.scheduler.Scheduled;
 import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.annotation.Nullable;
@@ -69,7 +68,8 @@ public class GameTracker {
     void handleGPGMessage(InboundGPGMessage<GPGMessage.Client> message) {
         GameHandler gameHandler = sessionGameHandlerMap.get(message.sessionId());
         if (gameHandler == null) {
-            throw new IllegalStateException("No game found for session");
+            LOG.warn("Received message for game that doesn't exist: {}", message);
+            return;
         }
 
         gameHandler.accept(message);
@@ -99,12 +99,7 @@ public class GameTracker {
         frozenDirtyGames.forEach(dirtyGames::remove);
     }
 
-    public void sendGamesToSession(long sessionId) {
-        Player player = playerTracker.getPlayerForSession(sessionId);
-        if (player == null) {
-            Log.warn("No player associated with session");
-            return;
-        }
+    public void sendGamesToSession(long sessionId, Player player) {
         Set<GameHandler> gameHandlers = Set.copyOf(gameIdMap.values());
 
         GameMessage.GameInfoList filteredGameInfoMessage = gameHandlers.stream()
@@ -125,24 +120,15 @@ public class GameTracker {
         GameHandler gameHandler = gameHandlerInstance.get();
         sessionGameHandlerMap.put(sessionId, gameHandler);
         gameIdMap.put(gameHandler.getGameId(), gameHandler);
-        Player player = playerTracker.getPlayerForSession(sessionId);
-        if (player == null) {
-            throw new IllegalStateException("Player not active");
-        }
 
         gameHandler.initializeDetails(title, mapName, gameDetails);
 
         gameHandler.launch(
-                new LaunchDetails(sessionId, new GamePlayer(player.getId(), player.getUsername()), Map.of(), null, null,
+                new LaunchDetails(sessionId, gameDetails.host(), Map.of(), null, null,
                                   null, null));
     }
 
-    void joinGame(long sessionId, int gameId, @Nullable String password) {
-        Player player = playerTracker.getPlayerForSession(sessionId);
-        if (player == null) {
-            throw new IllegalStateException("Player not active");
-        }
-
+    void joinGame(long sessionId, GamePlayer player, int gameId, @Nullable String password) {
         GameHandler gameHandler = gameIdMap.get(gameId);
         if (gameHandler == null) {
             outboundEmitter.send(OutboundGameMessage.forSession(sessionId,
@@ -164,7 +150,6 @@ public class GameTracker {
             return;
         }
 
-
         if (!gameHandler.isVisibleToPlayer(player)) {
             outboundEmitter.send(OutboundGameMessage.forSession(sessionId,
                                                                 new GameMessage.GameJoinFailed("not_eligible",
@@ -172,8 +157,9 @@ public class GameTracker {
             return;
         }
 
+        sessionGameHandlerMap.put(sessionId, gameHandler);
         gameHandler.launch(
-                new LaunchDetails(sessionId, new GamePlayer(player.getId(), player.getUsername()), Map.of(), null, null,
+                new LaunchDetails(sessionId, player, Map.of(), null, null,
                                   null, null));
     }
 
@@ -185,6 +171,10 @@ public class GameTracker {
         dirtyGames.put(gameInfo.uid(), new GameInfoWithFilter(gameInfo, filter));
     }
 
+    void removeConnectionToGame(long sessionId, GameHandler gameHandler) {
+        sessionGameHandlerMap.remove(sessionId, gameHandler);
+    }
+
     void removeGame(GameHandler gameHandler) {
         if (!gameIdMap.remove(gameHandler.getGameId(), gameHandler)) {
             LOG.warn("Game handler not associated with game id in game tracker");
@@ -192,6 +182,18 @@ public class GameTracker {
         }
 
         gameHandlerInstance.destroy(gameHandler);
+    }
+
+    void restoreConnectionToGame(long sessionId, int playerId, int gameId) {
+        GameHandler gameHandler = gameIdMap.get(gameId);
+        if (gameHandler == null) {
+            LOG.warn("Trying to restore connection to game id {} that no longer exists", gameId);
+            return;
+        }
+
+        if (gameHandler.updatePlayerSession(playerId, sessionId)) {
+            sessionGameHandlerMap.put(sessionId, gameHandler);
+        }
     }
 
     private record GameInfoWithFilter(

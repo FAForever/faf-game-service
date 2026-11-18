@@ -130,9 +130,9 @@ class MessageSerializationTest {
     void serializeGameInfoList() throws JSONException {
         GameInfo gameInfo = new GameInfo(5, "Test Game", "host", GameType.CUSTOM, 8, 3, GameVisibility.PRIVATE, true,
                                          GameStatus.OPEN, "faf", "global", Map.of("uid-1", "Some Mod"), "scmp_007",
-                                         "maps/scmp_007.zip",
                                          OffsetDateTime.of(2026, 1, 2, 3, 4, 5, 0, ZoneOffset.UTC).toInstant(),
-                                         1767323045L, "global", 800, 1200, true, Map.of(1, Set.of("test")), Set.of(new GameInfo.Team(1, Set.of(2))));
+                                         1767323045L, "global", 800, 1200, true, Map.of(1, Set.of("test")),
+                                         Set.of(new GameInfo.Team(1, Set.of(2))));
 
         String json = serializeGameServer(new GameMessage.GameInfoList(List.of(gameInfo)));
 
@@ -817,7 +817,8 @@ class MessageSerializationTest {
 
         assertThat(deserializeGPGClient("""
                                         {"command": "GameResult", "target": "game", "args": [1, "victory 10"]}
-                                        """), is(new GPGMessage.GameResult(1, new ResultDetails(ResultDetails.Type.Known.VICTORY, 10, List.of()))));
+                                        """), is(new GPGMessage.GameResult(1, new ResultDetails(
+                ResultDetails.Type.Known.VICTORY, 10, List.of()))));
     }
 
     /**
@@ -896,92 +897,92 @@ class MessageSerializationTest {
     void deserializeGPGJsonStats() {
         // The example from the doc's JsonStats schema
         GPGMessage.Client message = deserializeGPGJsonStats("""
-                                                                   {
-                                                                   	"stats": [
-                                                                   		{
-                                                                   			"name": "Player1",
-                                                                   			"type": "Human",
-                                                                   			"faction": 1,
-                                                                   			"general": {
-                                                                   				"score": 5370,
-                                                                   				"lastupdatetick": 18240,
-                                                                   				"currentunits": 87,
-                                                                   				"currentcap": 1000,
-                                                                   				"kills": {
-                                                                   					"count": 11,
-                                                                   					"mass": 18483.28,
-                                                                   					"energy": 5002463
-                                                                   				},
-                                                                   				"built": {
-                                                                   					"count": 19,
-                                                                   					"mass": 532,
-                                                                   					"energy": 4160
-                                                                   				},
-                                                                   				"lost": {
-                                                                   					"count": 1,
-                                                                   					"mass": 18000,
-                                                                   					"energy": 5000000
-                                                                   				}
-                                                                   			},
-                                                                   			"units": {
-                                                                   				"land": {
-                                                                   					"kills": 3,
-                                                                   					"built": 12,
-                                                                   					"lost": 1
-                                                                   				},
-                                                                   				"cdr": {
-                                                                   					"kills": 1,
-                                                                   					"built": 0,
-                                                                   					"lost": 0
-                                                                   				},
-                                                                   				"sacu": {
-                                                                   					"kills": 0,
-                                                                   					"built": 0,
-                                                                   					"lost": 0
-                                                                   				}
-                                                                   			},
-                                                                   			"blueprints": {
-                                                                   				"uel0001": {
-                                                                   					"kills": 1,
-                                                                   					"built": 0,
-                                                                   					"lost": 0,
-                                                                   					"lowest_health": 4210.5
-                                                                   				}
-                                                                   			},
-                                                                   			"resources": {
-                                                                   				"massin": {
-                                                                   					"total": 1004.2,
-                                                                   					"rate": 0.8,
-                                                                   					"reclaimed": 120,
-                                                                   					"reclaimRate": 0
-                                                                   				},
-                                                                   				"massout": {
-                                                                   					"total": 950,
-                                                                   					"rate": 0.7,
-                                                                   					"excess": 12
-                                                                   				},
-                                                                   				"energyin": {
-                                                                   					"total": 10129.7,
-                                                                   					"rate": 4,
-                                                                   					"reclaimed": 0,
-                                                                   					"reclaimRate": 0
-                                                                   				},
-                                                                   				"energyout": {
-                                                                   					"total": 9800,
-                                                                   					"rate": 3.9,
-                                                                   					"excess": 300
-                                                                   				},
-                                                                   				"storage": {
-                                                                   					"storedMass": 54,
-                                                                   					"storedEnergy": 330,
-                                                                   					"maxMass": 650,
-                                                                   					"maxEnergy": 4000
-                                                                   				}
-                                                                   			}
-                                                                   		}
-                                                                   	]
-                                                                   }
-                                                                   """);
+                                                            {
+                                                            	"stats": [
+                                                            		{
+                                                            			"name": "Player1",
+                                                            			"type": "Human",
+                                                            			"faction": 1,
+                                                            			"general": {
+                                                            				"score": 5370,
+                                                            				"lastupdatetick": 18240,
+                                                            				"currentunits": 87,
+                                                            				"currentcap": 1000,
+                                                            				"kills": {
+                                                            					"count": 11,
+                                                            					"mass": 18483.28,
+                                                            					"energy": 5002463
+                                                            				},
+                                                            				"built": {
+                                                            					"count": 19,
+                                                            					"mass": 532,
+                                                            					"energy": 4160
+                                                            				},
+                                                            				"lost": {
+                                                            					"count": 1,
+                                                            					"mass": 18000,
+                                                            					"energy": 5000000
+                                                            				}
+                                                            			},
+                                                            			"units": {
+                                                            				"land": {
+                                                            					"kills": 3,
+                                                            					"built": 12,
+                                                            					"lost": 1
+                                                            				},
+                                                            				"cdr": {
+                                                            					"kills": 1,
+                                                            					"built": 0,
+                                                            					"lost": 0
+                                                            				},
+                                                            				"sacu": {
+                                                            					"kills": 0,
+                                                            					"built": 0,
+                                                            					"lost": 0
+                                                            				}
+                                                            			},
+                                                            			"blueprints": {
+                                                            				"uel0001": {
+                                                            					"kills": 1,
+                                                            					"built": 0,
+                                                            					"lost": 0,
+                                                            					"lowest_health": 4210.5
+                                                            				}
+                                                            			},
+                                                            			"resources": {
+                                                            				"massin": {
+                                                            					"total": 1004.2,
+                                                            					"rate": 0.8,
+                                                            					"reclaimed": 120,
+                                                            					"reclaimRate": 0
+                                                            				},
+                                                            				"massout": {
+                                                            					"total": 950,
+                                                            					"rate": 0.7,
+                                                            					"excess": 12
+                                                            				},
+                                                            				"energyin": {
+                                                            					"total": 10129.7,
+                                                            					"rate": 4,
+                                                            					"reclaimed": 0,
+                                                            					"reclaimRate": 0
+                                                            				},
+                                                            				"energyout": {
+                                                            					"total": 9800,
+                                                            					"rate": 3.9,
+                                                            					"excess": 300
+                                                            				},
+                                                            				"storage": {
+                                                            					"storedMass": 54,
+                                                            					"storedEnergy": 330,
+                                                            					"maxMass": 650,
+                                                            					"maxEnergy": 4000
+                                                            				}
+                                                            			}
+                                                            		}
+                                                            	]
+                                                            }
+                                                            """);
 
         JsonStatsPayload.ArmyStats expectedArmy = new JsonStatsPayload.ArmyStats("Player1",
                                                                                  JsonStatsPayload.BrainType.Known.HUMAN,
@@ -1034,33 +1035,33 @@ class MessageSerializationTest {
         // A civilian army between two players leaves a null; Defeated appears once an army is defeated;
         // blueprints is optional
         GPGMessage.Client message = deserializeGPGJsonStats("""
-                                                                   {
-                                                                   	"stats": [
-                                                                   		{
-                                                                   			"name": "Player1",
-                                                                   			"type": "Human",
-                                                                   			"faction": 4,
-                                                                   			"Defeated": -1,
-                                                                   			"general": {
-                                                                   				"score": 10
-                                                                   			},
-                                                                   			"units": {},
-                                                                   			"resources": {}
-                                                                   		},
-                                                                   		null,
-                                                                   		{
-                                                                   			"name": "AI: Adaptive",
-                                                                   			"type": "AI",
-                                                                   			"faction": 3,
-                                                                   			"general": {
-                                                                   				"score": 20
-                                                                   			},
-                                                                   			"units": {},
-                                                                   			"resources": {}
-                                                                   		}
-                                                                   	]
-                                                                   }
-                                                                   """);
+                                                            {
+                                                            	"stats": [
+                                                            		{
+                                                            			"name": "Player1",
+                                                            			"type": "Human",
+                                                            			"faction": 4,
+                                                            			"Defeated": -1,
+                                                            			"general": {
+                                                            				"score": 10
+                                                            			},
+                                                            			"units": {},
+                                                            			"resources": {}
+                                                            		},
+                                                            		null,
+                                                            		{
+                                                            			"name": "AI: Adaptive",
+                                                            			"type": "AI",
+                                                            			"faction": 3,
+                                                            			"general": {
+                                                            				"score": 20
+                                                            			},
+                                                            			"units": {},
+                                                            			"resources": {}
+                                                            		}
+                                                            	]
+                                                            }
+                                                            """);
 
         assertThat(message, instanceOf(GPGMessage.JsonStats.class));
         List<JsonStatsPayload.ArmyStats> stats = ((GPGMessage.JsonStats) message).payload().stats();
@@ -1077,18 +1078,18 @@ class MessageSerializationTest {
     @Test
     void deserializeGPGJsonStatsUnknownBrainType() {
         GPGMessage.Client message = deserializeGPGJsonStats("""
-                                                                      {
-                                                                      	"stats": [
-                                                                      		{
-                                                                      			"name": "Player1",
-                                                                      			"type": "Spectator",
-                                                                      			"faction": 1,
-                                                                      			"general": {},
-                                                                      			"units": {},
-                                                                      			"resources": {}
-                                                                      		}
-                                                                      	]
-                                                                      }""");
+                                                            {
+                                                            	"stats": [
+                                                            		{
+                                                            			"name": "Player1",
+                                                            			"type": "Spectator",
+                                                            			"faction": 1,
+                                                            			"general": {},
+                                                            			"units": {},
+                                                            			"resources": {}
+                                                            		}
+                                                            	]
+                                                            }""");
 
         assertThat(message, instanceOf(GPGMessage.JsonStats.class));
         JsonStatsPayload.ArmyStats armyStats = ((GPGMessage.JsonStats) message).payload().stats().getFirst();
@@ -1100,55 +1101,55 @@ class MessageSerializationTest {
     void deserializeGPGJsonStatsIgnoresUnknownFields() {
         // Fields the doc doesn't list (e.g. from a newer game build) must not invalidate the stats
         GPGMessage.Client message = deserializeGPGJsonStats("""
-                                                                   {
-                                                                   	"version": 2,
-                                                                   	"stats": [
-                                                                   		{
-                                                                   			"name": "Player1",
-                                                                   			"type": "Human",
-                                                                   			"faction": 1,
-                                                                   			"team": 2,
-                                                                   			"general": {
-                                                                   				"score": 10,
-                                                                   				"apm": 120,
-                                                                   				"kills": {
-                                                                   					"count": 1,
-                                                                   					"mass": 2,
-                                                                   					"energy": 3,
-                                                                   					"bonus": 4
-                                                                   				}
-                                                                   			},
-                                                                   			"units": {
-                                                                   				"land": {
-                                                                   					"kills": 1,
-                                                                   					"built": 2,
-                                                                   					"lost": 3,
-                                                                   					"damage": 4
-                                                                   				}
-                                                                   			},
-                                                                   			"blueprints": {
-                                                                   				"uel0001": {
-                                                                   					"kills": 0,
-                                                                   					"built": 0,
-                                                                   					"lost": 0,
-                                                                   					"veterancy": 5
-                                                                   				}
-                                                                   			},
-                                                                   			"resources": {
-                                                                   				"massin": {
-                                                                   					"total": 1,
-                                                                   					"peak": 9
-                                                                   				},
-                                                                   				"storage": {
-                                                                   					"maxMass": 650,
-                                                                   					"minMass": 0
-                                                                   				},
-                                                                   				"reclaim": {}
-                                                                   			}
-                                                                   		}
-                                                                   	]
-                                                                   }
-                                                                   """);
+                                                            {
+                                                            	"version": 2,
+                                                            	"stats": [
+                                                            		{
+                                                            			"name": "Player1",
+                                                            			"type": "Human",
+                                                            			"faction": 1,
+                                                            			"team": 2,
+                                                            			"general": {
+                                                            				"score": 10,
+                                                            				"apm": 120,
+                                                            				"kills": {
+                                                            					"count": 1,
+                                                            					"mass": 2,
+                                                            					"energy": 3,
+                                                            					"bonus": 4
+                                                            				}
+                                                            			},
+                                                            			"units": {
+                                                            				"land": {
+                                                            					"kills": 1,
+                                                            					"built": 2,
+                                                            					"lost": 3,
+                                                            					"damage": 4
+                                                            				}
+                                                            			},
+                                                            			"blueprints": {
+                                                            				"uel0001": {
+                                                            					"kills": 0,
+                                                            					"built": 0,
+                                                            					"lost": 0,
+                                                            					"veterancy": 5
+                                                            				}
+                                                            			},
+                                                            			"resources": {
+                                                            				"massin": {
+                                                            					"total": 1,
+                                                            					"peak": 9
+                                                            				},
+                                                            				"storage": {
+                                                            					"maxMass": 650,
+                                                            					"minMass": 0
+                                                            				},
+                                                            				"reclaim": {}
+                                                            			}
+                                                            		}
+                                                            	]
+                                                            }
+                                                            """);
 
         assertThat(message, instanceOf(GPGMessage.JsonStats.class));
         JsonStatsPayload.ArmyStats army = ((GPGMessage.JsonStats) message).payload().stats().getFirst();

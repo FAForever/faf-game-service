@@ -2,13 +2,12 @@ package com.faforever.server.game;
 
 import com.faforever.server.domain.FriendOrFoeEntity;
 import com.faforever.server.game.dto.GameDetails;
+import com.faforever.server.game.dto.GamePlayer;
 import com.faforever.server.game.dto.RatingRange;
 import com.faforever.server.game.dto.Visibility;
 import com.faforever.server.message.client.GameMessage;
 import com.faforever.server.message.client.dto.GameType;
 import com.faforever.server.message.service.InboundGameMessage;
-import com.faforever.server.player.Player;
-import com.faforever.server.player.PlayerTracker;
 import jakarta.enterprise.context.ApplicationScoped;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
@@ -19,14 +18,12 @@ import java.nio.charset.StandardCharsets;
 @ApplicationScoped
 public class GameMessageHandler {
 
-    private final PlayerTracker playerTracker;
     private final GameTracker gameTracker;
 
     private final GameMessageHandlerRepository gameMessageHandlerRepository;
 
-    GameMessageHandler(PlayerTracker playerTracker, GameTracker gameTracker,
+    GameMessageHandler(GameTracker gameTracker,
                        GameMessageHandlerRepository gameMessageHandlerRepository) {
-        this.playerTracker = playerTracker;
         this.gameTracker = gameTracker;
         this.gameMessageHandlerRepository = gameMessageHandlerRepository;
     }
@@ -34,20 +31,16 @@ public class GameMessageHandler {
     @Incoming("game-inbound")
     public void handleRequest(InboundGameMessage<GameMessage.Client> request) {
         long sessionId = request.sessionId();
+        int playerId = request.playerId();
         switch (request.message()) {
-            case GameMessage.HostGameRequest hostGameRequest -> hostGame(sessionId, hostGameRequest);
-            case GameMessage.JoinGameRequest joinGameRequest -> joinGame(sessionId, joinGameRequest);
+            case GameMessage.HostGameRequest hostGameRequest -> hostGame(sessionId, playerId, hostGameRequest);
+            case GameMessage.JoinGameRequest joinGameRequest -> joinGame(sessionId, playerId, joinGameRequest);
             case GameMessage.RestoreGameSessionRequest restoreGameSessionRequest ->
-                    restoreGameSession(sessionId, restoreGameSessionRequest);
+                    restoreGameSession(sessionId, playerId, restoreGameSessionRequest);
         }
     }
 
-    private void hostGame(long sessionId, GameMessage.HostGameRequest hostMessage) {
-        Player player = playerTracker.getPlayerForSession(sessionId);
-        if (player == null) {
-            throw new IllegalStateException("session not associated with a player");
-        }
-
+    private void hostGame(long sessionId, int playerId, GameMessage.HostGameRequest hostMessage) {
         String title = hostMessage.title();
         if (title.isBlank()) {
             throw new IllegalStateException("Title must not be empty");
@@ -55,6 +48,11 @@ public class GameMessageHandler {
 
         if (!StandardCharsets.US_ASCII.newEncoder().canEncode(title)) {
             throw new IllegalStateException("Title must contain only ascii characters");
+        }
+
+        GamePlayer host = gameMessageHandlerRepository.loadPlayer(playerId);
+        if (host == null) {
+            throw new IllegalStateException("Unknown player id");
         }
 
         String featuredMod = hostMessage.featuredMod();
@@ -73,44 +71,29 @@ public class GameMessageHandler {
 
         Visibility visibility = switch (hostMessage.visibility()) {
             case PUBLIC -> new Visibility.Public(
-                    gameMessageHandlerRepository.loadFriendsAndFoes(player.getId(), FriendOrFoeEntity.Status.FOE));
+                    gameMessageHandlerRepository.loadFriendsAndFoes(playerId, FriendOrFoeEntity.Status.FOE));
             case PRIVATE -> new Visibility.Private(
-                    gameMessageHandlerRepository.loadFriendsAndFoes(player.getId(), FriendOrFoeEntity.Status.FRIEND));
+                    gameMessageHandlerRepository.loadFriendsAndFoes(playerId, FriendOrFoeEntity.Status.FRIEND));
         };
+
 
         gameTracker.hostGame(sessionId, title, mapName,
                              new GameDetails(visibility, hostMessage.password(), "global", GameType.CUSTOM,
-                                             hostMessage.featuredMod() == null ? "faf" : featuredMod, player.getId(),
-                                             player.getUsername(),
+                                             hostMessage.featuredMod() == null ? "faf" : featuredMod, host,
                                              new RatingRange(enforceRatingRange, ratingMin, ratingMax)));
     }
 
-    private void joinGame(long sessionId, GameMessage.JoinGameRequest joinMessage) {
-        Player player = playerTracker.getPlayerForSession(sessionId);
+    private void joinGame(long sessionId, int playerId, GameMessage.JoinGameRequest joinMessage) {
+        GamePlayer player = gameMessageHandlerRepository.loadPlayer(playerId);
         if (player == null) {
-            throw new IllegalStateException("session not associated with a player");
+            throw new IllegalStateException("Unknown player id");
         }
 
-        int gameId = joinMessage.gameId();
-
-        gameTracker.joinGame(sessionId, gameId, joinMessage.password());
+        gameTracker.joinGame(sessionId, player, joinMessage.gameId(), joinMessage.password());
     }
 
-    private void restoreGameSession(long sessionId, GameMessage.RestoreGameSessionRequest restoreMessage) {
-//        Player player = playerStateTracker.getPlayerForSession(sessionId);
-//        if (player == null) {
-//            throw new IllegalStateException("session not associated with a player");
-//        }
-//
-//        int gameId = restoreMessage.gameId();
-//        Game game = gameStateTracker.getGame(gameId);
-//        if (game == null) {
-//            throw new IllegalStateException("The game you were connected to no longer exists");
-//        }
-//
-//        if (!Set.of(Game.State.LOBBY, Game.State.LIVE).contains(game.getState())) {
-//            throw new IllegalStateException("The game you were connected to is no longer available");
-//        }
-
+    private void restoreGameSession(long sessionId, int playerId,
+                                    GameMessage.RestoreGameSessionRequest restoreMessage) {
+        gameTracker.restoreConnectionToGame(sessionId, playerId, restoreMessage.gameId());
     }
 }

@@ -11,7 +11,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class Player {
+class Player {
 
     @Getter
     private final int id;
@@ -50,7 +50,7 @@ public class Player {
         return sessionIds.contains(sessionId);
     }
 
-    public Optional<LeaderboardRating> getRating(String leaderboard) {
+    Optional<LeaderboardRating> getRating(String leaderboard) {
         return Optional.ofNullable(leaderboardRatings.get(leaderboard));
     }
 }

@@ -19,7 +19,9 @@ import com.faforever.server.message.client.dto.ResultDetails;
 import com.faforever.server.message.service.InboundGPGMessage;
 import com.faforever.server.message.service.OutboundGPGMessage;
 import com.faforever.server.message.service.OutboundGameMessage;
-import com.faforever.server.player.Player;
+import com.faforever.server.player.GameInfoWithFilter;
+import com.faforever.server.player.PlayerGameFilter;
+import com.faforever.server.player.PlayerTracker;
 import com.faforever.server.player.dto.LeaderboardRating;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -45,6 +47,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -56,43 +59,48 @@ import java.util.function.Function;
 class GameHandler {
 
     private final GameTracker gameTracker;
+    private final PlayerTracker playerTracker;
 
     private final Emitter<OutboundGPGMessage<GPGMessage.Server>> gpgEmitter;
     private final Emitter<OutboundGameMessage<GameMessage.Server>> lobbyEmitter;
     private final ThreadPoolExecutor gpgMessageExecutor;
 
+    private final ScheduledExecutorService scheduledExecutorService;
+
     private final GameSettings gameSettings;
 
     private final Counter gpgDroppedMessageCounter;
-
-    @Getter(AccessLevel.PACKAGE)
-    private final int gameId;
 
     private final Map<Integer, PlayerDetails> playerIdMap = new ConcurrentHashMap<>();
 
     private final LongAdder desyncs = new LongAdder();
     private final GameHandlerRepository gameHandlerRepository;
 
+    @Getter(AccessLevel.PACKAGE)
+    private @Nullable Integer gameId;
     private @Nullable GameDetails details;
     private @Nullable Instant hostedAt;
     private @Nullable Instant launchedAt;
 
     private State state = State.INITIALIZING;
+    private PlayerGameFilter playerGameFilter = PlayerGameFilter.VISIBLE_TO_NONE;
 
-    GameHandler(GameTracker gameTracker, MeterRegistry meterRegistry,
+    GameHandler(GameTracker gameTracker, PlayerTracker playerTracker, MeterRegistry meterRegistry,
                 @Channel("lobby-outbound") Emitter<OutboundGPGMessage<GPGMessage.Server>> gpgEmitter,
                 @Channel("lobby-outbound") Emitter<OutboundGameMessage<GameMessage.Server>> lobbyEmitter,
                 @ConfigProperty(name = "faf.max-message-queue-size", defaultValue = "0") int maxMessageQueueSize,
+                ScheduledExecutorService scheduledExecutorService,
                 GameSettings gameSettings, GameHandlerRepository gameHandlerRepository) {
         this.gameTracker = gameTracker;
+        this.playerTracker = playerTracker;
         this.gpgEmitter = gpgEmitter;
         this.lobbyEmitter = lobbyEmitter;
         this.gpgMessageExecutor = createMessageExecutor(
                 maxMessageQueueSize == 0 ? Integer.MAX_VALUE : maxMessageQueueSize);
+        this.scheduledExecutorService = scheduledExecutorService;
         this.gameSettings = gameSettings;
-        gpgDroppedMessageCounter = meterRegistry.counter("faf.gpg.messages.dropped");
-        gameId = gameTracker.nextGameId();
         this.gameHandlerRepository = gameHandlerRepository;
+        gpgDroppedMessageCounter = meterRegistry.counter("faf.gpg.messages.dropped");
     }
 
     private ThreadPoolExecutor createMessageExecutor(int queueSize) {
@@ -122,8 +130,8 @@ class GameHandler {
         };
     }
 
-    @Nullable GameInfo createGameInfo() {
-        if (details == null) {
+    @Nullable GameInfoWithFilter createGameInfo() {
+        if (details == null || gameId == null) {
             return null;
         }
 
@@ -142,7 +150,7 @@ class GameHandler {
             playerIds.stream()
                      .map(playerIdMap::get)
                      .filter(Objects::nonNull)
-                     .filter(playerDetails -> playerDetails.getState() == PlayerState.CONNECTED)
+                     .filter(playerDetails -> playerDetails.getState() == PlayerGameState.CONNECTED)
                      .forEach(playerDetails -> {
                          teamPlayerNames.add(playerDetails.getName());
                          teamPlayerIds.add(playerDetails.getId());
@@ -163,26 +171,30 @@ class GameHandler {
             case Visibility.Public _ -> GameVisibility.PUBLIC;
         };
         FAFMap map = gameSettings.getMap();
-        return new GameInfo(gameId, gameSettings.getGameTitle(), details.host().name(), details.gameType(),
-                            gameSettings.getNumSlots(), numActivePlayers, visibility, details.password() != null,
-                            gameStatus, details.featuredMod(), details.leaderboard(), gameSettings.getSimMods(),
-                            map.mapName(), hostedAt,
-                            launchedAt == null ? null : launchedAt.getEpochSecond(), details.leaderboard(),
-                            ratingRange.min(), ratingRange.max(), ratingRange.enforce(), teams, teamIds);
+        GameInfo gameInfo = new GameInfo(gameId, gameSettings.getGameTitle(), details.host().name(), details.gameType(),
+                                         gameSettings.getNumSlots(), numActivePlayers, visibility,
+                                         details.password() != null,
+                                         gameStatus, details.featuredMod(), details.leaderboard(),
+                                         gameSettings.getSimMods(),
+                                         map.mapName(), hostedAt,
+                                         launchedAt == null ? null : launchedAt.getEpochSecond(), details.leaderboard(),
+                                         ratingRange.min(), ratingRange.max(), ratingRange.enforce(), teams, teamIds);
+        return new GameInfoWithFilter(gameInfo, playerGameFilter);
     }
 
-    void initializeDetails(String title, String mapName, GameDetails gameDetails) {
-        if (details != null) {
+    void initializeDetails(int gameId, String title, String mapName, GameDetails gameDetails) {
+        if (details != null || this.gameId != null) {
             throw new IllegalStateException("Game details already set");
         }
 
+        this.gameId = gameId;
         this.details = gameDetails;
         this.gameSettings.setGameTitle(title);
         this.gameSettings.setMapName(mapName);
     }
 
     void launch(LaunchDetails launchDetails) {
-        if (details == null) {
+        if (details == null || gameId == null) {
             throw new IllegalStateException("Game details not set");
         }
 
@@ -209,7 +221,7 @@ class GameHandler {
 
         long sessionId = launchDetails.sessionId();
         GamePlayer player = launchDetails.player();
-        playerIdMap.put(player.id(), new PlayerDetails(player.id(), player.name(), sessionId, PlayerState.CONNECTING));
+        playerIdMap.put(player.id(), new PlayerDetails(player.id(), player.name(), sessionId, PlayerGameState.CONNECTING));
 
         lobbyEmitter.send(OutboundGameMessage.forSession(sessionId, gameLaunchResponse));
     }
@@ -220,7 +232,6 @@ class GameHandler {
             LOG.warn("Trying to update session for player that is not connected to the game");
             return false;
         }
-        gameTracker.removeConnectionToGame(playerDetails.getSessionId(), this);
         playerDetails.setSessionId(sessionId);
         return true;
     }
@@ -236,38 +247,10 @@ class GameHandler {
         return details != null && (details.password() == null || details.password().equals(password));
     }
 
-    boolean isVisibleToPlayer(Player player) {
-        return isVisibleToPlayer(player.getId(), player::getRating);
-    }
-
     boolean isVisibleToPlayer(GamePlayer player) {
-        return isVisibleToPlayer(player.id(),
-                                 leaderboard -> gameHandlerRepository.loadPlayerRating(player.id(), leaderboard));
+        return playerGameFilter.isVisible(player.id(), leaderboard -> gameHandlerRepository.loadPlayerRating(player.id(), leaderboard));
     }
 
-    private boolean isVisibleToPlayer(int playerId, Function<String, Optional<LeaderboardRating>> ratingFunction) {
-        if (details == null) {
-            return false;
-        }
-
-        if (state != State.LOBBY) {
-            return true;
-        }
-
-        if (playerIdMap.containsKey(playerId)) {
-            return true;
-        }
-
-        if (!details.visibility().isVisibleTo(playerId)) {
-            return false;
-        }
-
-        //TODO: check if 0 is appropriate
-        return details.ratingRange()
-                      .inRange(ratingFunction.apply(details.leaderboard())
-                                             .map(LeaderboardRating::displayedRating)
-                                             .orElse(0d));
-    }
 
     @MDCPopulated
     void accept(InboundGPGMessage<GPGMessage.Client> message) {
@@ -286,7 +269,7 @@ class GameHandler {
     }
 
     private void handleGPGMessage(InboundGPGMessage<GPGMessage.Client> message) {
-        if (details == null) {
+        if (details == null || gameId == null) {
             throw new IllegalStateException("GPG message received before game details set");
         }
 
@@ -316,7 +299,7 @@ class GameHandler {
             case GPGMessage.Desync _ -> desyncs.increment();
             case GPGMessage.Disconnected disconnected -> LOG.debug("Player disconnected: {}", disconnected);
             case GPGMessage.GameEnded _ -> {
-                player.setState(PlayerState.ENDED);
+                player.setState(PlayerGameState.ENDED);
                 endIfFinished();
             }
             case GPGMessage.GameFull _ -> LOG.debug("Game is full");
@@ -353,7 +336,7 @@ class GameHandler {
                                 joinGame(hostDetails, player);
                             }
                         }
-                        player.setState(PlayerState.CONNECTED);
+                        player.setState(PlayerGameState.CONNECTED);
                         markDirty();
                     }
                     case GPGMessage.GameState.State.Known.LAUNCHING -> {
@@ -370,6 +353,7 @@ class GameHandler {
                         LOG.info("Launching game");
                         launchedAt = Instant.now();
                         state = State.LIVE;
+                        playerGameFilter = PlayerGameFilter.VISIBLE_TO_ALL;
                         gameSettings.markLaunched();
                         markDirty();
                     }
@@ -423,6 +407,29 @@ class GameHandler {
         }
     }
 
+    private boolean isVisible(int viewingPlayerId, Function<String, Optional<LeaderboardRating>> playerRatingFunction) {
+        if (details == null) {
+            return false;
+        }
+
+        if (playerIdMap.containsKey(viewingPlayerId)) {
+            return true;
+        }
+
+        if (!details.visibility().isVisibleTo(viewingPlayerId)) {
+            return false;
+        }
+
+        if (!details.ratingRange().enforce()) {
+            return true;
+        }
+
+        double rating = playerRatingFunction.apply(details.leaderboard())
+                                            .map(LeaderboardRating::displayedRating)
+                                            .orElse(0d);
+        return details.ratingRange().inRange(rating);
+    }
+
     private void removePlayer(int playerId) {
         PlayerDetails playerDetails = playerIdMap.remove(playerId);
         if (state == State.LOBBY) {
@@ -431,7 +438,7 @@ class GameHandler {
         if (playerDetails == null) {
             return;
         }
-        gameTracker.removeConnectionToGame(playerDetails.getSessionId(), this);
+        gameTracker.removeConnectionToGame(playerDetails.getId(), this);
     }
 
     private void joinGame(PlayerDetails hostDetails, PlayerDetails player) {
@@ -444,7 +451,7 @@ class GameHandler {
                                                       new GPGMessage.ConnectToPeer(player.getName(), player.getId(),
                                                                                    true)));
         playerIdMap.forEach((peerId, peerDetails) -> {
-            if (peerId == hostDetails.getId() || peerDetails.getState() != PlayerState.CONNECTED) {
+            if (peerId == hostDetails.getId() || peerDetails.getState() != PlayerGameState.CONNECTED) {
                 return;
             }
 
@@ -463,6 +470,7 @@ class GameHandler {
                 OutboundGPGMessage.forSession(sessionId, new GPGMessage.HostGame(gameSettings.getMap().mapName())));
         hostedAt = Instant.now();
         state = State.LOBBY;
+        playerGameFilter = this::isVisible;
     }
 
     private void endIfFinished() {
@@ -487,47 +495,43 @@ class GameHandler {
         state = State.ENDED;
 
         playerIdMap.values()
-                   .forEach(playerDetails -> gameTracker.removeConnectionToGame(playerDetails.getSessionId(), this));
+                   .forEach(playerDetails -> gameTracker.removeConnectionToGame(playerDetails.getId(), this));
         gameTracker.removeGame(this);
         gpgMessageExecutor.shutdown();
-        GameInfo gameInfo = createGameInfo();
-        if (gameInfo == null) {
+        GameInfoWithFilter gameInfoWithFilter = createGameInfo();
+        if (gameInfoWithFilter == null) {
             return;
         }
 
-        gameTracker.stageUpdate(gameInfo, this::isVisibleToPlayer);
+        playerTracker.stageUpdate(gameInfoWithFilter);
     }
 
     private boolean playersStillConnected() {
-        return !playerIdMap.values().stream().map(PlayerDetails::getState).allMatch(PlayerState.ENDED::equals);
+        return !playerIdMap.values().stream().map(PlayerDetails::getState).allMatch(PlayerGameState.ENDED::equals);
     }
 
     private boolean hostPresentInLobby() {
         return details == null ||
                (state == State.LOBBY &&
                 playerIdMap.get(details.host().id()) != null &&
-                playerIdMap.get(details.host().id()).getState() != PlayerState.ENDED);
+                playerIdMap.get(details.host().id()).getState() != PlayerGameState.ENDED);
     }
 
     private void markDirty() {
-        GameInfo gameInfo = createGameInfo();
+        GameInfoWithFilter gameInfo = createGameInfo();
         if (gameInfo == null) {
             return;
         }
 
-        gameTracker.stageUpdate(gameInfo, this::isVisibleToPlayer);
-        if (state == State.ENDED) {
-            gameTracker.removeGame(this);
-            gpgMessageExecutor.shutdown();
-        }
+        playerTracker.stageUpdate(gameInfo);
     }
 
     private enum State {
         INITIALIZING, LOBBY, LIVE, ENDED
     }
 
-    private enum PlayerState {
-        CONNECTING, CONNECTED, ENDED
+    private enum PlayerGameState {
+        CONNECTING, CONNECTED, ENDED, DISCONNECTED
     }
 
     @AllArgsConstructor
@@ -538,6 +542,6 @@ class GameHandler {
         private final String name;
 
         private long sessionId;
-        private PlayerState state;
+        private PlayerGameState state;
     }
 }

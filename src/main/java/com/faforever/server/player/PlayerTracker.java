@@ -3,6 +3,9 @@ package com.faforever.server.player;
 import com.faforever.server.game.GameTracker;
 import com.faforever.server.interceptor.cdi.MDCInterceptor;
 import com.faforever.server.interceptor.cdi.MDCPopulated;
+import com.faforever.server.message.client.GameMessage;
+import com.faforever.server.message.client.dto.GameInfo;
+import com.faforever.server.message.service.OutboundGameMessage;
 import com.faforever.server.message.service.PlayerSessionState;
 import com.faforever.server.micrometer.PlayerSessionStateResolver;
 import com.faforever.server.player.dto.LeaderboardRating;
@@ -14,7 +17,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.quarkus.scheduler.Scheduled;
 import io.smallrye.common.annotation.RunOnVirtualThread;
-import jakarta.annotation.Nullable;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import lombok.AccessLevel;
@@ -43,6 +45,8 @@ public class PlayerTracker {
 
     private final GameTracker gameTracker;
 
+    private final Emitter<OutboundGameMessage<GameMessage.Server>> outboundEmitter;
+
     private final Emitter<Map<String, String>> playerConnectionsRequestEmitter;
 
     private final Clock clock;
@@ -53,14 +57,17 @@ public class PlayerTracker {
 
     @Getter(AccessLevel.PACKAGE)
     private final Map<Long, SessionDetails> sessionMap;
+    @Getter(AccessLevel.PACKAGE)
+    private final Map<Integer, GameInfoWithFilter> dirtyGames = new ConcurrentHashMap<>();
 
     private Instant lastRatingUpdateTime = Instant.now();
 
-    PlayerTracker(
-            GameTracker gameTracker, @Channel("player-session-request") Emitter<Map<String, String>> playerConnectionsRequestEmitter,
-            Clock clock, PlayerTrackerRepository playerTrackerRepository,
-            MeterRegistry meterRegistry) {
+    PlayerTracker(GameTracker gameTracker,
+                  @Channel("lobby-outbound") Emitter<OutboundGameMessage<GameMessage.Server>> outboundEmitter,
+                  @Channel("player-session-request") Emitter<Map<String, String>> playerConnectionsRequestEmitter,
+                  Clock clock, PlayerTrackerRepository playerTrackerRepository, MeterRegistry meterRegistry) {
         this.gameTracker = gameTracker;
+        this.outboundEmitter = outboundEmitter;
         this.playerConnectionsRequestEmitter = playerConnectionsRequestEmitter;
         this.clock = clock;
         this.playerTrackerRepository = playerTrackerRepository;
@@ -72,8 +79,7 @@ public class PlayerTracker {
                                                       .stream()
                                                       .map(SessionDetails::getExpirationTime)
                                                       .filter(instant -> instant.isAfter(clock.instant()))
-                                                      .count())
-             .tag("state", "expired").register(meterRegistry);
+                                                      .count()).tag("state", "expired").register(meterRegistry);
     }
 
     @PostConstruct
@@ -90,7 +96,7 @@ public class PlayerTracker {
             case PlayerSessionState.State.New(Duration secondsToExpiry) -> {
                 Player player = registerPlayerSession(playerSessionStatus.sessionId(), playerSessionStatus.playerId(),
                                                       secondsToExpiry);
-                gameTracker.sendGamesToSession(playerSessionStatus.sessionId(), player);
+                sendActiveGames(playerSessionStatus.sessionId(), player);
                 LOG.info("Registered new session");
             }
 
@@ -99,6 +105,19 @@ public class PlayerTracker {
                                           secondsToExpiry);
             case PlayerSessionState.State.Gone() -> unregisterSession(playerSessionStatus.sessionId());
         }
+    }
+
+    private void sendActiveGames(long sessionId, Player player) {
+        GameMessage.GameInfoList visibleGames = gameTracker.getActiveGames()
+                                                           .stream()
+                                                           .filter(gameInfoWithFilter -> gameInfoWithFilter.filter()
+                                                                                                           .isVisible(
+                                                                                                                   player.getId(),
+                                                                                                                   player::getRating))
+                                                           .map(GameInfoWithFilter::gameInfo)
+                                                           .collect(Collectors.collectingAndThen(Collectors.toSet(),
+                                                                                                 GameMessage.GameInfoList::new));
+        outboundEmitter.send(OutboundGameMessage.forSession(sessionId, visibleGames));
     }
 
     private Player registerPlayerSession(long sessionId, int playerId, Duration secondsToExpiry) {
@@ -221,17 +240,34 @@ public class PlayerTracker {
         });
     }
 
-    public @Nullable Player getPlayerForSession(long sessionId) {
-        SessionDetails sessionDetails = sessionMap.get(sessionId);
-        if (sessionDetails == null) {
-            return null;
+    @Scheduled(every = "1s", skipExecutionIf = Scheduled.ApplicationNotRunning.class,
+               concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void sendDirtyGames() {
+        Map<Integer, GameInfoWithFilter> frozenDirtyGames = Map.copyOf(dirtyGames);
+        if (frozenDirtyGames.isEmpty()) {
+            return;
         }
 
-        return playerIdMap.get(sessionDetails.getPlayerId());
+        playerIdMap.values().forEach(player -> {
+            Set<GameInfo> visibleGames = dirtyGames.values()
+                                                   .stream()
+                                                   .filter(game -> game.filter()
+                                                                       .isVisible(player.getId(), player::getRating))
+                                                   .map(GameInfoWithFilter::gameInfo)
+                                                   .collect(Collectors.toSet());
+            GameMessage.GameInfoList filteredGameInfoMessage = new GameMessage.GameInfoList(visibleGames);
+            if (filteredGameInfoMessage.games().isEmpty()) {
+                return;
+            }
+
+            outboundEmitter.send(OutboundGameMessage.forPlayer(player.getId(), filteredGameInfoMessage));
+        });
+
+        frozenDirtyGames.forEach(dirtyGames::remove);
     }
 
-    public Collection<Player> getPlayers() {
-        return Set.copyOf(playerIdMap.values());
+    public void stageUpdate(GameInfoWithFilter gameInfoWithFilter) {
+        dirtyGames.put(gameInfoWithFilter.gameInfo().uid(), gameInfoWithFilter);
     }
 
     @AllArgsConstructor
